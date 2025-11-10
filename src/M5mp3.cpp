@@ -95,6 +95,9 @@ int lastSelectedIndex = -1;  // Last selected song index
 unsigned long selectedTime = 0;  // Time when current song was selected
 int selectedScrollPos = 8;  // Scroll position for selected song (initial position)
 const unsigned long SELECTED_SCROLL_DELAY = 1000;  // Delay before starting scroll after selection (ms)
+String cachedAudioInfo = "";  // Cached audio sample rate and bit depth string
+unsigned long lastAudioInfoUpdate = 0;  // Last audio info update time
+const unsigned long AUDIO_INFO_UPDATE_INTERVAL = 500;  // Audio info update interval (ms) - check every 500ms after song starts
 bool volUp = false;
 int n = 0;                // current file index (selected)
 int currentPlayingIndex = 0;  // Actually playing song index
@@ -940,6 +943,39 @@ void draw() {
     }
     sprite.drawString(modeText, 150, 63);
     
+    // Update audio info (sample rate and bit depth) cache periodically
+    // Delay reading to allow decoder to initialize (check every 500ms)
+    if (isPlaying && !stoped && (now - lastAudioInfoUpdate >= AUDIO_INFO_UPDATE_INTERVAL)) {
+      uint32_t sampleRate = audio.getSampleRate();
+      uint8_t bitsPerSample = audio.getBitsPerSample();
+      if (sampleRate > 0 && bitsPerSample > 0) {
+        // Convert sample rate to kHz for shorter display
+        // Format: "44.1/16" or "48/16" or "96/24" etc.
+        float sampleRateKHz = sampleRate / 1000.0f;
+        // Format with 1 decimal place if needed (e.g., 44.1, 48.0 -> 48)
+        if (sampleRateKHz == (int)sampleRateKHz) {
+          // Integer kHz, no decimal needed
+          cachedAudioInfo = String((int)sampleRateKHz) + "/" + String(bitsPerSample);
+        } else {
+          // Has decimal part, show 1 decimal place
+          cachedAudioInfo = String(sampleRateKHz, 1) + "/" + String(bitsPerSample);
+        }
+        lastAudioInfoUpdate = now;
+      } else {
+        // Decoder not ready yet, keep empty or previous value
+        if (cachedAudioInfo.length() == 0) {
+          cachedAudioInfo = "";
+        }
+      }
+    }
+    
+    // Display audio info (sample rate/bit depth) on the right side of playback mode
+    if (cachedAudioInfo.length() > 0) {
+      sprite.setTextDatum(2);  // Right alignment
+      sprite.drawString(cachedAudioInfo, 232, 63);  // Right edge at x=232 (148+86-2)
+      sprite.setTextDatum(0);  // Restore left alignment
+    }
+    
     // If showing delete dialog, draw dialog
     if (showDeleteDialog) {
       // Draw dialog background and border (increased height to accommodate Chinese)
@@ -1147,6 +1183,9 @@ void Task_Audio(void *pvParameters) {
       if (SD.exists(audioFiles[n])) {
         audio.connecttoFS(SD, audioFiles[n].c_str());
         currentPlayingIndex = n;  // Update actual playing index
+        // Reset audio info cache when switching songs (will be updated after decoder initializes)
+        cachedAudioInfo = "";
+        lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
       } else {
         Serial.printf("Task_Audio: file not found: %s\n", audioFiles[n].c_str());
       }
@@ -1258,6 +1297,9 @@ void audio_eof_mp3(const char *info) {
                 audioFiles[currentPlayingIndex].c_str(), currentPlayingIndex, playMode);
   if (SD.exists(audioFiles[currentPlayingIndex])) {
     audio.connecttoFS(SD, audioFiles[currentPlayingIndex].c_str());
+    // Reset audio info cache when auto-switching songs (will be updated after decoder initializes)
+    cachedAudioInfo = "";
+    lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
   } else {
     Serial.printf("eof: next file not found: %s\n", audioFiles[currentPlayingIndex].c_str());
   }
