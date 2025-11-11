@@ -5,34 +5,92 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 ## Features
 
 ### Audio Playback
-- Supports MP3 and WAV formats
-- Automatically reads audio files from `/music` directory (falls back to root directory if not found)
-- Supports up to 100 songs
-- Three playback modes: Sequential, Random, Single Repeat
+- **Format Support**: MP3 and WAV audio formats
+- **Auto-Discovery**: Automatically scans `/music` directory (falls back to root if not found)
+- **Capacity**: Supports up to 100 songs
+- **Playback Modes**:
+  - **SEQ (Sequential)**: Plays songs in order, automatically advances to next
+  - **RND (Random)**: Random song selection, avoids repeating current song
+  - **ONE (Single Repeat)**: Repeats the current song indefinitely
+- **Audio Quality**: 
+  - Adaptive sample rate support (up to 192kHz)
+  - 16-bit depth, stereo output
+  - Real-time sample rate and bit depth display
+- **ID3 Metadata**: 
+  - Displays album cover art (JPEG, PNG, BMP, GIF, QOI formats)
+  - Shows title, artist, album information
+  - Dedicated ID3 information page (press 'I' key)
 
 ### Multi-Language Character Support
-- Full UTF-8 encoding support for displaying Chinese, Japanese, and Korean song names
-- Automatic language detection and font selection:
-  - **Korean**: Uses `efontKR_12` font (detects Hangul syllables U+AC00-U+D7AF)
-  - **Japanese**: Uses `efontJA_12` font (detects Hiragana U+3040-U+309F, Katakana U+30A0-U+30FF, and Kanji)
-  - **Chinese**: Uses `efontCN_12` font (detects CJK Unified Ideographs U+4E00-U+9FFF)
-  - **English/Others**: Uses default system font
-- Font selection priority: Korean > Japanese > Chinese > Default
-- Song list automatically adapts to multi-language display (16-pixel line height)
+- **Full UTF-8 Support**: Displays Chinese, Japanese, and Korean song names correctly
+- **Automatic Language Detection**: 
+  - **Korean**: Uses `efontKR_12` font (Hangul syllables U+AC00-U+D7AF)
+  - **Japanese**: Uses `efontJA_12` font (Hiragana U+3040-U+309F, Katakana U+30A0-U+30FF, Kanji)
+  - **Chinese**: Uses `efontCN_12` font (CJK Unified Ideographs U+4E00-U+9FFF)
+  - **English/Others**: Default system font
+- **Font Priority**: Korean > Japanese > Chinese > Default
+- **Optimized Display**: 16-pixel line height for proper CJK character rendering
 
 ### User Interface
-- **Left LIST Area**: Displays song list (up to 7 lines)
-  - Red: Currently playing song
-  - White: Currently selected song
-  - Green: Other songs
-  - Selected song name scrolls from right to left after staying selected for more than 1 second
-- **Right WINAMP Area**: Displays playback status, volume, brightness, battery, etc.
-- Playback mode display: Shows current mode (SEQ/RND/ONE) above volume display
+- **Dual-Panel Layout**:
+  - **Left LIST Area**: Song list display (up to 7 visible lines)
+    - Color coding: Red (playing), White (selected), Green (others)
+    - Smart scrolling for long filenames
+    - Circular navigation (wraps around at ends)
+  - **Right WINAMP-Style Area**: 
+    - Playback status and controls
+    - Volume and brightness sliders
+    - Battery percentage and time display
+    - Spectrum visualization
+    - Playback mode indicator (SEQ/RND/ONE)
+- **Smart Scrolling**: 
+  - Selected song names scroll horizontally after 1 second
+  - Scrolling strictly contained within LIST box boundaries
+  - Automatic reset when selection changes
+- **Clean Display**: File names shown without path and extension
 
-### Smart Scrolling
-- Selected song name automatically scrolls to display full filename
-- Scrolling range strictly limited within LIST box, won't exceed or overlap scrollbar
-- File names automatically remove path and extension for cleaner interface
+### File Management
+- **Song Deletion**: 
+  - Confirmation dialog for safety
+  - Smart deletion logic: continues playing if deleted song is not current
+  - Automatic next song switch if current song is deleted
+  - Proper index management after deletion
+- **Screenshot Capture**: 
+  - Press 'F' to capture current screen
+  - Saves as 24-bit BMP format (240x135 pixels)
+  - Automatic timestamp in filename
+  - Saves to `/screen` directory (auto-created)
+
+### Power Management
+- **Screen Control**: 
+  - Toggle screen on/off (S key)
+  - Automatically saves brightness when turning off
+  - Restores saved brightness when turning on
+  - Skips drawing operations when screen is off (saves CPU)
+
+### Volume & Brightness Control
+- **Volume Control**:
+  - Fine control: `-` (decrease) and `=` (increase) keys (step 1)
+  - Quick control: `V` key cycles through levels (step 5)
+  - Range: 0-21 levels
+  - Visual slider with smooth movement
+- **Brightness Control**:
+  - `L` key cycles through 5 brightness levels
+  - Visual indicator on screen
+
+### Performance Optimizations
+- **Caching Mechanisms**:
+  - Battery display: Updates every 30 seconds
+  - Time display: Updates every 1 second
+  - Audio info: Updates on track change
+- **Update Throttling**:
+  - Spectrum graph: Updates every 200ms
+  - Text scrolling: Updates every 4 frames
+  - Screen refresh: Optimized to 20fps (50ms delay)
+- **Memory Management**:
+  - Stream-only album cover handling (no RAM caching)
+  - Optimized screenshot capture (row-by-row processing)
+  - Efficient string operations (snprintf instead of String concatenation)
 
 ## Key Controls
 
@@ -73,26 +131,24 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
   - Automatically creates `/screen` directory if it doesn't exist
   - Saves as 24-bit BMP format (240x135 pixels)
 
-## Technical Features
-
-### Performance Optimization
-- Battery display caching (updates every 30 seconds)
-- Time display caching (updates every 1 second)
-- Spectrum graph update throttling (200ms interval)
-- Text scrolling optimization (updates every 4 frames)
-- Screen refresh rate optimization (20fps, 50ms delay)
-
-### Playback Logic
-- Smart index management: Distinguishes between selected index and playing index
-- Automatic index adjustment when deleting songs, doesn't affect current playback
-- Automatically switches to next song when deleting currently playing song
-- Continues playing current song when deleting non-playing songs
+## Technical Details
 
 ### Hardware Support
-- Supports M5Cardputer Standard and Advanced versions
-- Automatically detects hardware version and configures appropriate audio driver
-- Supports headphone detection with automatic amplifier state switching
-- Uses ESP32-audioI2S library (version 2.0.0)
+- **M5Cardputer Variants**:
+  - Standard version (AW88298 codec)
+  - Advanced version (ES8311 codec)
+- **Auto-Detection**: Automatically detects hardware variant and configures appropriate audio driver
+- **Headphone Detection**: Automatic amplifier state switching when headphones are inserted/removed
+- **Audio Library**: ESP32-audioI2S (version 2.0.0)
+
+### Code Architecture
+- **Modular Design**: 
+  - Separated into 8 independent modules for better maintainability
+  - Clear interface boundaries and responsibilities
+  - Reduced main file from ~1800 to ~420 lines (76% reduction)
+- **State Management**: Centralized application state in `AppState` structure
+- **Configuration**: All constants centralized in `config.hpp`
+- **Logging**: Unified logging system with compile-time switches
 
 ## File Structure
 
@@ -118,112 +174,20 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 
 Use PlatformIO to compile and flash.
 
-## Changelog
+## Version History
 
-### Version 2.0 - Major Feature Additions and Improvements
+For detailed changelog, please see [CHANGELOG.md](CHANGELOG.md).
 
-#### New Features
+**Current Version**: 2.1.0
 
-1. **Multi-Language Character Support**
-   - Added UTF-8 encoding support for displaying Chinese, Japanese, and Korean song names
-   - Implemented automatic language detection with font selection:
-     - Korean: `efontKR_12` (Hangul syllables)
-     - Japanese: `efontJA_12` (Hiragana, Katakana, Kanji)
-     - Chinese: `efontCN_12` (CJK Unified Ideographs)
-     - English/Others: Default system font
-   - Font selection priority: Korean > Japanese > Chinese > Default
-   - Adjusted line height from 12 to 16 pixels to accommodate CJK characters
+**Recent Highlights**:
+- Major code structure refactoring and modularization
+- Improved performance and memory management
+- Enhanced code maintainability
 
-2. **Screen Power Management**
-   - Added screen off/on toggle functionality (S key)
-   - Automatically saves current brightness when turning off screen
-   - Restores saved brightness when turning screen back on
-   - Skips drawing operations when screen is off to save CPU
-
-3. **Song Deletion Feature**
-   - Added delete confirmation dialog (D key to show, Y to confirm, C to cancel)
-   - Smart deletion logic: continues playing current song if deleted song is not playing
-   - Automatically switches to next song if currently playing song is deleted
-   - Properly adjusts all indices after deletion
-
-4. **Playback Mode System**
-   - Added three playback modes: Sequential (SEQ), Random (RND), Single Repeat (ONE)
-   - Mode toggle via M key (replaces original B key random function)
-   - Mode indicator displayed in top-right area (replaces scrolling song title)
-   - Automatic next song selection based on selected mode
-   - Smart N/P key behavior: In random mode, both N and P keys select random songs (avoiding current playing song)
-
-5. **Fine Volume Control**
-   - Added `-` key for decreasing volume (step 1)
-   - Added `=` key for increasing volume (step 1)
-   - Improved volume bar calculation for smooth linear mapping (0-21 range mapped to 60 pixels)
-   - Original V key still works for step-based volume cycling (step 5)
-
-6. **Smart Scrolling for Selected Songs**
-   - Selected song names scroll from right to left after 1 second delay
-   - Scrolling strictly limited within LIST box boundaries (doesn't overlap scrollbar)
-   - Automatically resets scroll position when selection changes
-   - Optimized update rate (every 4 frames) to reduce CPU usage
-
-7. **Dual Index System**
-   - Separated selected index (`n`) from playing index (`currentPlayingIndex`)
-   - Enables independent navigation and playback tracking
-   - Properly handles index adjustments during song deletion
-
-8. **Screenshot Feature**
-   - Added screenshot capture functionality (F key)
-   - Saves screenshots as 24-bit BMP files to `/screen` directory
-   - Automatic directory creation if `/screen` doesn't exist
-   - Filename includes timestamp for easy identification
-   - Captures full screen (240x135 pixels) from sprite buffer
-
-#### Enhanced Features
-
-1. **File Organization**
-   - Changed default music directory from `/mp3s` to `/music`
-   - File names displayed without path and extension for cleaner interface
-   - Improved file path extraction and display logic
-
-2. **User Interface Improvements**
-   - Reduced song list display from 10 lines to 7 lines (better fit with 16px line height)
-   - Added color coding: Red for playing song, White for selected song, Green for others
-   - Removed top scrolling area (previously showed current playing song title)
-   - Replaced with playback mode indicator (SEQ/RND/ONE)
-
-3. **List Navigation**
-   - Made list navigation circular: pressing up at first song jumps to last, pressing down at last jumps to first
-   - Improved navigation logic for better user experience
-
-4. **Performance Optimizations**
-   - Battery display caching: updates every 30 seconds (was real-time)
-   - Time display caching: updates every 1 second (was real-time)
-   - Spectrum graph throttling: updates every 200ms (was every frame)
-   - Text scrolling optimization: updates every 4 frames
-   - Screen refresh rate: optimized to 20fps (50ms delay, was 25fps/40ms)
-   - Main loop delay: increased to 200ms (was 100ms) to reduce CPU usage
-
-5. **Volume Control Enhancement**
-   - Improved volume bar calculation: linear mapping `155 + (volume * 60 / 21)` instead of step-based `(volume / 5) * 17`
-   - Ensures smooth movement for each volume unit change
-
-6. **Code Quality**
-   - All comments translated to English
-   - Improved code organization and structure
-   - Better variable naming and documentation
-
-#### Removed Features
-
-- Removed top scrolling song title area (replaced with playback mode display)
-- Removed B key random playback function (replaced with M key mode toggle)
-
-#### Technical Changes
-
-- Added multiple global state variables for new features (screenOff, showDeleteDialog, playMode, etc.)
-- Implemented caching mechanisms for battery, time, and graph updates
-- Added scroll position tracking for selected songs
-- Enhanced `deleteCurrentFile()` function with smart index management
-- Modified `audio_eof_mp3()` to support different playback modes
-- Updated `draw()` function with Chinese font support and improved rendering logic
+**Previous Major Versions**:
+- **v2.0.0**: Multi-language support, playback modes, ID3 display, screenshot feature
+- **v1.0.0**: Initial release with basic MP3/WAV playback
 
 ## Notes
 
