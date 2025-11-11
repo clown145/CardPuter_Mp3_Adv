@@ -98,6 +98,22 @@ const unsigned long SELECTED_SCROLL_DELAY = 1000;  // Delay before starting scro
 String cachedAudioInfo = "";  // Cached audio sample rate and bit depth string
 unsigned long lastAudioInfoUpdate = 0;  // Last audio info update time
 const unsigned long AUDIO_INFO_UPDATE_INTERVAL = 500;  // Audio info update interval (ms) - check every 500ms after song starts
+// ID3 view state and data
+bool showID3Page = false;
+String id3Title = "";
+String id3Artist = "";
+String id3Album = "";
+String id3Year = "";
+// Album art buffer (JPEG) - keep a cap to avoid OOM
+uint8_t* id3CoverBuf = nullptr;
+size_t id3CoverSize = 0;
+const size_t ID3_COVER_MAX = 120 * 1024;  // 120KB cap
+size_t id3CoverPos = 0;   // APIC data offset in file for streaming
+size_t id3CoverLen = 0;   // APIC data length
+// Album text scrolling within cover width
+int id3AlbumScrollPos = 0;
+unsigned long id3AlbumSelectTime = 0;
+const unsigned long ID3_SCROLL_DELAY = 1000;
 bool volUp = false;
 int n = 0;                // current file index (selected)
 int currentPlayingIndex = 0;  // Actually playing song index
@@ -660,7 +676,248 @@ void loop() {
   delay(200);  // Increase polling interval to reduce CPU usage
 }
 void draw() {
-  if (graphSpeed == 0) {
+  if (showID3Page) {
+    // Render ID3 page
+    sprite.fillRect(0, 0, 240, 135, BLACK);
+    // Left area: cover 96x96 at (8,8)
+    const int coverX = 8;
+    const int coverY = 8;
+    const int coverW = 96;
+    const int coverH = 96;
+    if (id3CoverBuf && id3CoverSize > 0) {
+      // Detect image type by magic bytes
+      bool isJpeg = (id3CoverSize >= 2 && id3CoverBuf[0] == 0xFF && id3CoverBuf[1] == 0xD8);
+      bool isPng  = (id3CoverSize >= 8 && id3CoverBuf[0] == 0x89 && id3CoverBuf[1] == 0x50 && id3CoverBuf[2] == 0x4E && id3CoverBuf[3] == 0x47);
+      // Center-fit into 96x96: drawJpg/drawPng with max width/height performs scaling; center by computing offset if decoded size < box
+      // M5GFX drawJpg/drawPng supports specifying target box; they auto fit keeping aspect ratio.
+      if (isJpeg) {
+        sprite.drawJpg(id3CoverBuf, id3CoverSize, coverX, coverY, coverW, coverH);
+      } else if (isPng) {
+        sprite.drawPng(id3CoverBuf, id3CoverSize, coverX, coverY, coverW, coverH);
+      } else {
+        // Unknown format; show placeholder frame with info
+        sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+        sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+        sprite.setTextColor(grays[14], grays[4]);
+        sprite.setTextDatum(4);
+        sprite.drawString("No Cover", coverX + coverW/2, coverY + coverH/2);
+        sprite.setTextDatum(0);
+      }
+    } else if (id3CoverSize == 0 && id3CoverPos > 0) {
+      // Streaming draw from the MP3 file at stored APIC position
+      File f = SD.open(audioFiles[currentPlayingIndex]);
+      if (f) {
+        if (f.seek(id3CoverPos)) {
+          // Some APIC frames include MIME/type/desc bytes before the actual image.
+          // Scan the beginning of the APIC data block for image magic bytes and start decoding there.
+          const size_t scanMax = (id3CoverLen > 0 && id3CoverLen < 4096) ? id3CoverLen : (size_t)4096;
+          size_t toScan = (id3CoverLen > 0 && id3CoverLen < scanMax) ? id3CoverLen : scanMax;
+          uint8_t buf[512];
+          size_t scanned = 0;
+          size_t foundOff = SIZE_MAX;
+          // JPEG / PNG / BMP / GIF / QOI signatures
+          const uint8_t sigJpg[2] = {0xFF, 0xD8};
+          const uint8_t sigPng[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+          const uint8_t sigBmp[2] = {0x42, 0x4D}; // 'BM'
+          const uint8_t sigGif1[6] = {0x47,0x49,0x46,0x38,0x39,0x61}; // GIF89a
+          const uint8_t sigGif0[6] = {0x47,0x49,0x46,0x38,0x37,0x61}; // GIF87a
+          const uint8_t sigQoi[4] = {0x71,0x6F,0x69,0x66}; // 'qoif'
+          // Iterate in chunks
+          while (scanned < toScan) {
+            size_t chunk = (toScan - scanned) > sizeof(buf) ? sizeof(buf) : (toScan - scanned);
+            size_t rd = f.read(buf, chunk);
+            if (rd == 0) break;
+            // Search JPEG
+            for (size_t i = 0; i + 1 < rd; ++i) {
+              if (buf[i] == sigJpg[0] && buf[i+1] == sigJpg[1]) {
+                foundOff = scanned + i;
+                break;
+              }
+            }
+            // If not found JPEG, search PNG
+            if (foundOff == SIZE_MAX) {
+              for (size_t i = 0; i + sizeof(sigPng) <= rd; ++i) {
+                if (memcmp(&buf[i], sigPng, sizeof(sigPng)) == 0) {
+                  foundOff = scanned + i;
+                  break;
+                }
+              }
+            }
+            // If not found, search BMP
+            if (foundOff == SIZE_MAX) {
+              for (size_t i = 0; i + 2 <= rd; ++i) {
+                if (buf[i] == sigBmp[0] && buf[i+1] == sigBmp[1]) { foundOff = scanned + i; break; }
+              }
+            }
+            // If not found, search GIF
+            if (foundOff == SIZE_MAX) {
+              for (size_t i = 0; i + 6 <= rd; ++i) {
+                if (memcmp(&buf[i], sigGif1, 6) == 0 || memcmp(&buf[i], sigGif0, 6) == 0) { foundOff = scanned + i; break; }
+              }
+            }
+            // If not found, search QOI
+            if (foundOff == SIZE_MAX) {
+              for (size_t i = 0; i + 4 <= rd; ++i) {
+                if (memcmp(&buf[i], sigQoi, 4) == 0) { foundOff = scanned + i; break; }
+              }
+            }
+            if (foundOff != SIZE_MAX) break;
+            scanned += rd;
+          }
+          // Compute actual start
+          size_t startOff = (foundOff == SIZE_MAX) ? 0 : foundOff;
+          // Seek to image start and draw
+          f.seek(id3CoverPos + startOff);
+          // Read header to decide format and size
+          uint8_t head[32];
+          size_t hdr = f.read(head, sizeof(head));
+          bool isJpeg = (hdr >= 2 && head[0] == 0xFF && head[1] == 0xD8);
+          bool isPng  = (hdr >= 8 && head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47 && head[4]==0x0D && head[5]==0x0A && head[6]==0x1A && head[7]==0x0A);
+          bool isBmp  = (hdr >= 2 && head[0] == 'B' && head[1] == 'M');
+          bool isGif  = (hdr >= 6 && ((memcmp(head, sigGif1, 6) == 0) || (memcmp(head, sigGif0, 6) == 0)));
+          bool isQoi  = (hdr >= 4 && memcmp(head, sigQoi, 4) == 0);
+          uint32_t imgW = 0, imgH = 0;
+          // Determine dimensions (best-effort)
+          if (isPng && hdr >= 24) {
+            // IHDR at bytes 16-24 (width,height big-endian)
+            imgW = (head[16] << 24) | (head[17] << 16) | (head[18] << 8) | head[19];
+            imgH = (head[20] << 24) | (head[21] << 16) | (head[22] << 8) | head[23];
+          } else if (isJpeg) {
+            // Scan for SOF0/SOF2 (use the same dynamic limit)
+            const size_t jpegScanMax = 4096;
+            size_t scannedJ = hdr;
+            // Use a small buffer
+            while (scannedJ < jpegScanMax) {
+              int c1 = f.read(); if (c1 < 0) break;
+              if ((uint8_t)c1 != 0xFF) { scannedJ++; continue; }
+              int c2 = f.read(); if (c2 < 0) break; scannedJ += 2;
+              if (c2 == 0xC0 || c2 == 0xC2) {
+                uint8_t lenH = f.read(); uint8_t lenL = f.read();
+                uint8_t prec = f.read();
+                uint8_t hH = f.read(); uint8_t hL = f.read();
+                uint8_t wH = f.read(); uint8_t wL = f.read();
+                imgH = ((uint32_t)hH << 8) | hL; imgW = ((uint32_t)wH << 8) | wL;
+                break;
+              } else {
+                // Skip segment length
+                uint8_t lh = f.read(); uint8_t ll = f.read(); scannedJ += 2;
+                uint16_t seglen = (lh << 8) | ll;
+                if (seglen < 2) break;
+                f.seek(f.position() + seglen - 2);
+                scannedJ += seglen - 2;
+              }
+            }
+          } else if (isBmp && hdr >= 26) {
+            // BMP width/height at offset 18..25 (little-endian 32bit)
+            imgW = (uint32_t)head[18] | ((uint32_t)head[19] << 8) | ((uint32_t)head[20] << 16) | ((uint32_t)head[21] << 24);
+            imgH = (uint32_t)head[22] | ((uint32_t)head[23] << 8) | ((uint32_t)head[24] << 16) | ((uint32_t)head[25] << 24);
+            if ((int32_t)imgH < 0) imgH = (uint32_t)(-(int32_t)imgH); // handle top-down BMP
+          } else if (isGif && hdr >= 10) {
+            // GIF width/height at 6..9 (little-endian 16bit)
+            imgW = (uint32_t)head[6] | ((uint32_t)head[7] << 8);
+            imgH = (uint32_t)head[8] | ((uint32_t)head[9] << 8);
+          } else if (isQoi && hdr >= 14) {
+            // QOI: 'qoif' + 4-byte BE width + 4-byte BE height
+            imgW = ((uint32_t)head[4] << 24) | ((uint32_t)head[5] << 16) | ((uint32_t)head[6] << 8) | (uint32_t)head[7];
+            imgH = ((uint32_t)head[8] << 24) | ((uint32_t)head[9] << 16) | ((uint32_t)head[10] << 8) | (uint32_t)head[11];
+          }
+          // Reset to image start for decoder
+          f.seek(id3CoverPos + startOff);
+          // Only draw if we can identify the format
+          if (isJpeg || isPng || isBmp || isQoi) {
+            // Compute scale factor to fit image within cover box (proportional)
+            float scale = 1.0f;
+            if (imgW > 0 && imgH > 0) {
+              float sx2 = (float)coverW / (float)imgW;
+              float sy2 = (float)coverH / (float)imgH;
+              scale = sx2 < sy2 ? sx2 : sy2;
+              // Ensure scale is valid and doesn't exceed 1.0 (no upscaling)
+              if (scale <= 0.0f || scale > 1.0f) scale = 1.0f;
+            } else {
+              // If dimensions unknown, use a conservative scale
+              // The maxWidth/maxHeight will enforce the box boundary
+              scale = 0.5f; // Conservative scale for unknown size
+            }
+            // Always use maxWidth/maxHeight to strictly limit drawing area to cover box
+            // This prevents images from overflowing even if scale calculation is wrong
+            if (isJpeg) {
+              // scale_x=scale, scale_y=0 means preserve aspect ratio
+              sprite.drawJpg(&f, coverX, coverY, coverW, coverH, 0, 0, scale, 0.0f);
+            } else if (isPng) {
+              sprite.drawPng(&f, coverX, coverY, coverW, coverH, 0, 0, scale, 0.0f);
+            } else if (isBmp) {
+              sprite.drawBmp(&f, coverX, coverY, coverW, coverH, 0, 0, scale, 0.0f);
+            } else if (isQoi) {
+              sprite.drawQoi(&f, coverX, coverY, coverW, coverH, 0, 0, scale, 0.0f);
+            }
+          } else {
+            // Unknown format or no valid image header
+            sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+            sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+            sprite.setTextColor(grays[14], grays[4]);
+            sprite.setTextDatum(4);
+            sprite.drawString("No Cover", coverX + coverW/2, coverY + coverH/2);
+            sprite.setTextDatum(0);
+          }
+        } else {
+          sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+          sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+        }
+        f.close();
+      } else {
+        sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+        sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+      }
+    } else {
+      // Placeholder
+      sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+      sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+      sprite.setTextColor(grays[14], grays[4]);
+      sprite.setTextDatum(4);
+      sprite.drawString("No Cover", coverX + coverW/2, coverY + coverH/2);
+      sprite.setTextDatum(0);
+    }
+    // Album text area below cover: 16px height
+    const int albumY = coverY + coverH + 2;
+    const int albumH = 16;
+    sprite.fillRect(coverX, albumY, coverW, albumH, BLACK);
+    sprite.setTextColor(WHITE, BLACK);
+    // Use CJK font if needed
+    const lgfx::U8g2font* albumFont = detectAndGetFont(id3Album);
+    if (albumFont) sprite.setFont(albumFont); else sprite.setTextFont(0);
+    // Scrolling if too wide
+    int16_t tw = sprite.textWidth(id3Album);
+    int clipW = coverW;
+    if (tw <= clipW) {
+      String albumDraw = id3Album.length() ? id3Album : String("Unknown Album");
+      sprite.drawString(albumDraw, coverX, albumY);
+    } else {
+      if (id3AlbumSelectTime == 0) id3AlbumSelectTime = millis();
+      if (millis() - id3AlbumSelectTime >= ID3_SCROLL_DELAY && graphSpeed == 0) {
+        id3AlbumScrollPos -= 2;
+        if (id3AlbumScrollPos + tw < 0) id3AlbumScrollPos = clipW;
+      }
+      sprite.setClipRect(coverX, albumY, coverW, albumH);
+      sprite.drawString(id3Album, coverX + id3AlbumScrollPos, albumY);
+      sprite.clearClipRect();
+    }
+    // Right side: Artist (top), Title below, both 16px height
+    sprite.setTextFont(0);
+    // Artist with CJK font if needed
+    const lgfx::U8g2font* artistFont = detectAndGetFont(id3Artist);
+    if (artistFont) sprite.setFont(artistFont); else sprite.setTextFont(0);
+    sprite.setTextColor(WHITE, BLACK);
+    {
+      String artistDraw = id3Artist.length() ? id3Artist : String("Unknown Artist");
+      sprite.drawString(artistDraw, 120, 8);
+    }
+    // Title optional (not requested but useful)
+    const lgfx::U8g2font* titleFont = detectAndGetFont(id3Title);
+    if (titleFont) sprite.setFont(titleFont); else sprite.setTextFont(0);
+    sprite.setTextColor(grays[2], BLACK);
+    sprite.drawString(id3Title, 120, 26);
+    sprite.pushSprite(0, 0);
+  } else if (graphSpeed == 0) {
     gray = grays[15];
     light = grays[11];
     sprite.fillRect(0, 0, 240, 135, gray);
@@ -1162,6 +1419,12 @@ void Task_TFT(void *pvParameters) {
         // 'f' key: Capture screenshot
         captureScreenshot();
       }
+      if (M5Cardputer.Keyboard.isKeyPressed('i')) {
+        // Toggle ID3 page
+        showID3Page = !showID3Page;
+        // Reset album scroll state upon entering ID3 page
+        if (showID3Page) { id3AlbumScrollPos = 0; id3AlbumSelectTime = millis(); }
+      }
     }
     // If screen is off, skip drawing to save CPU
     if (!screenOff) {
@@ -1186,6 +1449,10 @@ void Task_Audio(void *pvParameters) {
       audio.stopSong();
       Serial.printf("Task_Audio: next track requested: %s\n", audioFiles[n].c_str());
       if (SD.exists(audioFiles[n])) {
+        // Reset ID3 metadata before opening the next file to avoid stale display
+        id3Title = ""; id3Artist = ""; id3Album = ""; id3Year = "";
+        id3CoverPos = 0; id3CoverLen = 0;
+        if (id3CoverBuf) { heap_caps_free(id3CoverBuf); id3CoverBuf = nullptr; id3CoverSize = 0; }
         audio.connecttoFS(SD, audioFiles[n].c_str());
         currentPlayingIndex = n;  // Update actual playing index
         // Reset audio info cache when switching songs (will be updated after decoder initializes)
@@ -1305,6 +1572,9 @@ void audio_eof_mp3(const char *info) {
     // Reset audio info cache when auto-switching songs (will be updated after decoder initializes)
     cachedAudioInfo = "";
     lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
+    // Reset ID3 metadata
+    id3Title = id3Artist = id3Album = id3Year = "";
+    if (id3CoverBuf) { heap_caps_free(id3CoverBuf); id3CoverBuf = nullptr; id3CoverSize = 0; }
   } else {
     Serial.printf("eof: next file not found: %s\n", audioFiles[currentPlayingIndex].c_str());
   }
@@ -1525,5 +1795,74 @@ void captureScreenshot() {
   heap_caps_free(rowBuffer);
   
   Serial.printf("Screenshot saved: %s\n", filename.c_str());
+}
+
+// ID3 callbacks from ESP32-audioI2S
+void audio_id3data(const char* info) {
+  if (!info) return;
+  String s(info);
+  Serial.printf("ID3DATA: %s\n", s.c_str());
+
+  // Strip UTF-16 BOM if present
+  if (s.length() >= 2 && (uint8_t)s[0] == 0xFF && (uint8_t)s[1] == 0xFE) {
+    s = s.substring(2);
+  } else if (s.length() >= 2 && (uint8_t)s[0] == 0xFE && (uint8_t)s[1] == 0xFF) {
+    s = s.substring(2);
+  }
+
+  auto assignKV = [&](const char* key, String& out) {
+    int n = strlen(key);
+    if (s.startsWith(key)) {
+      int pos = n;
+      if (pos < s.length() && (s[pos] == ':' || s[pos] == '=')) pos++;
+      String v = s.substring(pos);
+      v.trim();
+      if (v.length() > 0) { out = v; return true; }
+    }
+    return false;
+  };
+
+  bool matched = false;
+  matched |= assignKV("Title",  id3Title);
+  matched |= assignKV("Artist", id3Artist);
+  matched |= assignKV("Album",  id3Album);
+  matched |= assignKV("Year",   id3Year);
+
+  auto assignFrame = [&](const char* frame, String& out) {
+    int n = strlen(frame);
+    if (s.startsWith(frame)) {
+      String v = s.substring(n);
+      if (v.length() > 0 && (v[0] == ':' || v[0] == '=')) v = v.substring(1);
+      v.trim();
+      if (v.length() > 0) { out = v; return true; }
+    }
+    return false;
+  };
+
+  matched |= assignFrame("TIT2", id3Title);
+  matched |= assignFrame("TPE1", id3Artist);
+  matched |= assignFrame("TALB", id3Album);
+  matched |= assignFrame("TYER", id3Year);
+  matched |= assignFrame("TDRC", id3Year);
+
+  // Ignore encoder/封装器信息，避免污染显示
+  if (!matched) {
+    if (s.startsWith("SettingsForEncoding") || s.startsWith("encoder") || s.startsWith("EncodedBy") || s.indexOf("Lavf") >= 0) {
+      return;
+    }
+  }
+
+  if (matched) {
+    Serial.printf("ID3 parsed => Title='%s' Artist='%s' Album='%s' Year='%s'\n",
+                  id3Title.c_str(), id3Artist.c_str(), id3Album.c_str(), id3Year.c_str());
+  }
+}
+
+void audio_id3image(File& file, const size_t pos, const size_t size) {
+  // Streaming-only: never allocate full image into RAM
+  id3CoverPos = pos;
+  id3CoverLen = size;
+  if (id3CoverBuf) { heap_caps_free(id3CoverBuf); id3CoverBuf = nullptr; id3CoverSize = 0; }
+  Serial.printf("ID3 image will stream: size=%u pos=%u\n", (unsigned)size, (unsigned)pos);
 }
 
