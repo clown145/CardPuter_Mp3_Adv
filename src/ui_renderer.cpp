@@ -33,9 +33,20 @@ void drawId3Page(M5Canvas& sprite,
   const int coverY = COVER_Y;
   const int coverW = COVER_WIDTH;
   const int coverH = COVER_HEIGHT;
-  if (appState.id3CoverBuf && appState.id3CoverSize > 0) {
-    bool isJpeg = (appState.id3CoverSize >= 2 && appState.id3CoverBuf[0] == 0xFF && appState.id3CoverBuf[1] == 0xD8);
-    bool isPng  = (appState.id3CoverSize >= 8 && appState.id3CoverBuf[0] == 0x89 && appState.id3CoverBuf[1] == 0x50 && appState.id3CoverBuf[2] == 0x4E && appState.id3CoverBuf[3] == 0x47);
+  
+  // Make local copies to avoid race conditions with Task_Audio
+  // Task_Audio may free id3CoverBuf or change currentPlayingIndex while we're rendering
+  uint8_t* localCoverBuf = appState.id3CoverBuf;
+  size_t localCoverSize = appState.id3CoverSize;
+  size_t localCoverPos = appState.id3CoverPos;
+  size_t localCoverLen = appState.id3CoverLen;
+  int localPlayingIndex = appState.currentPlayingIndex;
+  
+  // Double-check: verify the buffer is still valid (pointer hasn't changed)
+  // This helps catch cases where Task_Audio freed and reallocated the buffer
+  if (localCoverBuf && localCoverSize > 0 && appState.id3CoverBuf == localCoverBuf && appState.id3CoverSize == localCoverSize) {
+    bool isJpeg = (localCoverSize >= 2 && localCoverBuf[0] == 0xFF && localCoverBuf[1] == 0xD8);
+    bool isPng  = (localCoverSize >= 8 && localCoverBuf[0] == 0x89 && localCoverBuf[1] == 0x50 && localCoverBuf[2] == 0x4E && localCoverBuf[3] == 0x47);
     
     if (isJpeg || isPng) {
       // Get image dimensions and calculate proper scale
@@ -44,7 +55,7 @@ void drawId3Page(M5Canvas& sprite,
       float scaleX = 1.0f;
       float scaleY = 0.0f;  // 0.0 means follow scaleX (maintain aspect ratio)
       
-      if (getImageSizeFromBuffer(appState.id3CoverBuf, appState.id3CoverSize, fmt, imgW, imgH) && imgW > 0 && imgH > 0) {
+      if (getImageSizeFromBuffer(localCoverBuf, localCoverSize, fmt, imgW, imgH) && imgW > 0 && imgH > 0) {
         float sx = (float)coverW / (float)imgW;
         float sy = (float)coverH / (float)imgH;
         scaleX = sx < sy ? sx : sy;  // Use smaller scale to fit both dimensions
@@ -56,9 +67,9 @@ void drawId3Page(M5Canvas& sprite,
       
       // M5GFX drawJpg/drawPng from buffer support scale parameters directly!
       if (isJpeg) {
-        sprite.drawJpg(appState.id3CoverBuf, appState.id3CoverSize, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+        sprite.drawJpg(localCoverBuf, localCoverSize, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
       } else {
-        sprite.drawPng(appState.id3CoverBuf, appState.id3CoverSize, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+        sprite.drawPng(localCoverBuf, localCoverSize, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
       }
     } else {
       sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
@@ -68,17 +79,26 @@ void drawId3Page(M5Canvas& sprite,
       sprite.drawString(PLACEHOLDER_NO_COVER, coverX + coverW/2, coverY + coverH/2);
       sprite.setTextDatum(0);
     }
-  } else if (appState.id3CoverSize == 0 && appState.id3CoverPos > 0) {
-    File f = SD.open(appState.audioFiles[appState.currentPlayingIndex]);
+  } else if (localCoverSize == 0 && localCoverPos > 0) {
+    // Check if playing index is valid before accessing audioFiles array
+    // Also verify index hasn't changed (race condition protection)
+    if (localPlayingIndex < 0 || localPlayingIndex >= appState.fileCount || 
+        appState.currentPlayingIndex != localPlayingIndex) {
+      sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+      sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+      return;  // Early return to avoid array out of bounds or stale data
+    }
+    
+    File f = SD.open(appState.audioFiles[localPlayingIndex]);
     if (f) {
-      if (f.seek(appState.id3CoverPos)) {
-        const size_t scanMax = (appState.id3CoverLen > 0 && appState.id3CoverLen < COVER_SCAN_MAX) ? appState.id3CoverLen : (size_t)COVER_SCAN_MAX;
+      if (f.seek(localCoverPos)) {
+        const size_t scanMax = (localCoverLen > 0 && localCoverLen < COVER_SCAN_MAX) ? localCoverLen : (size_t)COVER_SCAN_MAX;
         size_t startOff = 0;
         ImageFormat fmt = ImageFormat::Unknown;
         findImageStart(f, scanMax, startOff, fmt);
         uint32_t imgW = 0, imgH = 0;
-        bool gotSize = getImageSize(f, appState.id3CoverPos + startOff, fmt, imgW, imgH);
-        f.seek(appState.id3CoverPos + startOff);
+        bool gotSize = getImageSize(f, localCoverPos + startOff, fmt, imgW, imgH);
+        f.seek(localCoverPos + startOff);
         if (fmt != ImageFormat::Unknown) {
           float scaleX = 1.0f;
           float scaleY = 0.0f;  // 0.0 means follow scaleX (maintain aspect ratio)
