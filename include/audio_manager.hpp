@@ -21,7 +21,10 @@ class Audio* getAudioInstance();
 bool initialize(AppState& appState);
 
 // Connect to audio file on SD card
-void connectToFile(fs::FS& fs, const char* path);
+bool connectToFile(fs::FS& fs, const char* path);
+
+// Connect to network audio stream URL
+bool connectToHost(const char* url);
 
 // Stop current playback
 void stop();
@@ -60,4 +63,3 @@ void onID3Image(File& file, const size_t pos, const size_t size, AppState& appSt
 void onEOF(const char* info, AppState& appState, fs::FS& fs);
 
 }  // namespace AudioManager
-

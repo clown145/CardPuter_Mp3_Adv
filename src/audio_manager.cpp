@@ -17,11 +17,14 @@ static Audio* g_audio = nullptr;
 namespace AudioManager {
 
 bool initialize(AppState& appState) {
-  // Audio object will be created externally and passed via setAudioInstance
-  // For now, we'll use a static instance
+  (void)appState;
+  // Keep externally injected instance when provided from setup().
+  if (g_audio) return true;
+
+  // Fallback for cases where setup() didn't inject an Audio instance.
   static Audio audioInstance;
   g_audio = &audioInstance;
-  return true;
+  return g_audio != nullptr;
 }
 
 void setAudioInstance(Audio* audio) {
@@ -32,9 +35,14 @@ Audio* getAudioInstance() {
   return g_audio;
 }
 
-void connectToFile(fs::FS& fs, const char* path) {
-  if (!g_audio) return;
-  g_audio->connecttoFS(fs, path);
+bool connectToFile(fs::FS& fs, const char* path) {
+  if (!g_audio || !path) return false;
+  return g_audio->connecttoFS(fs, path);
+}
+
+bool connectToHost(const char* url) {
+  if (!g_audio || !url) return false;
+  return g_audio->connecttohost(url);
 }
 
 void stop() {
@@ -143,10 +151,10 @@ void onID3Image(File& file, const size_t pos, const size_t size, AppState& appSt
   // Streaming-only: never allocate full image into RAM
   appState.id3CoverPos = pos;
   appState.id3CoverLen = size;
-  if (appState.id3CoverBuf) { 
-    heap_caps_free(appState.id3CoverBuf); 
-    appState.id3CoverBuf = nullptr; 
-    appState.id3CoverSize = 0; 
+  if (appState.id3CoverBuf) {
+    heap_caps_free(appState.id3CoverBuf);
+    appState.id3CoverBuf = nullptr;
+    appState.id3CoverSize = 0;
   }
   LOG_PRINTF("ID3 image will stream: size=%u pos=%u\n", (unsigned)size, (unsigned)pos);
 }
@@ -160,7 +168,7 @@ void onEOF(const char* info, AppState& appState, fs::FS& fs) {
     LOG_PRINTLN("eof: queue is empty");
     return;
   }
-  
+
   // Determine next song based on playback mode
   if (appState.playMode == PlaybackMode::Sequential) {
     // Sequential playback: next song
@@ -173,16 +181,16 @@ void onEOF(const char* info, AppState& appState, fs::FS& fs) {
     // Single repeat: don't change index, continue playing current song
     // appState.currentPlayingIndex remains unchanged
   }
-  
+
   appState.currentSelectedIndex = appState.currentPlayingIndex;  // Sync selected index to playing index
   String nextPath;
   if (!FileManager::getPathByQueueIndex(fs, appState, appState.currentPlayingIndex, nextPath)) {
     LOG_PRINTF("eof: failed to resolve queue index %d\n", appState.currentPlayingIndex);
     return;
   }
-  LOG_PRINTF("eof: opening next file: %s (index %d, mode %d)\n", 
+  LOG_PRINTF("eof: opening next file: %s (index %d, mode %d)\n",
                 nextPath.c_str(),
-                appState.currentPlayingIndex, 
+                appState.currentPlayingIndex,
                 static_cast<int>(appState.playMode));
   if (fs.exists(nextPath)) {
     connectToFile(fs, nextPath.c_str());

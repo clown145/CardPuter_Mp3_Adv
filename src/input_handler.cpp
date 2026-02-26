@@ -137,6 +137,13 @@ bool processDeleteAndScreenshot(AppState& appState, const Actions& actions) {
     }
     return needRedraw;
   }
+  if (appState.networkMode) {
+    if (M5Cardputer.Keyboard.isKeyPressed('f')) {
+      if (actions.captureScreenshot) actions.captureScreenshot();
+      needRedraw = true;
+    }
+    return needRedraw;
+  }
   // 'd' open dialog
   if (M5Cardputer.Keyboard.isKeyPressed('d')) {
     if (!appState.showDeleteDialog && appState.fileCount > 0 && appState.currentSelectedIndex < appState.fileCount) {
