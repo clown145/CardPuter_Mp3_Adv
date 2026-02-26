@@ -81,6 +81,10 @@ struct AppState {
   String browserEntryName[MAX_BROWSER_ENTRIES];
   String browserEntryPath[MAX_BROWSER_ENTRIES];          // For directories: target dir
   int browserEntryCount = 0;
+  bool showBrowserDeleteDialog = false;
+  bool browserDeleteTargetIsDir = false;
+  String browserDeleteTargetPath = "";
+  String browserDeleteTargetName = "";
   
   // Helper methods
   int getBrightness() const {
@@ -107,6 +111,10 @@ struct AppState {
     }
     resetPathCache();
     resetBrowserEntries();
+    showBrowserDeleteDialog = false;
+    browserDeleteTargetIsDir = false;
+    browserDeleteTargetPath = "";
+    browserDeleteTargetName = "";
   }
 
   void resetBrowserEntries() {
@@ -119,6 +127,10 @@ struct AppState {
       browserEntryName[i] = "";
       browserEntryPath[i] = "";
     }
+    showBrowserDeleteDialog = false;
+    browserDeleteTargetIsDir = false;
+    browserDeleteTargetPath = "";
+    browserDeleteTargetName = "";
   }
   
   void resetID3Metadata() {

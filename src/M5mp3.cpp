@@ -91,6 +91,12 @@ static String getParentDirectory(const String& path) {
   return path.substring(0, lastSlash);
 }
 
+static bool pathInDirectoryRecursive(const String& path, const String& dir) {
+  if (dir == "/") return path.startsWith("/");
+  String prefix = dir + "/";
+  return path == dir || path.startsWith(prefix);
+}
+
 // Detect language from text and return appropriate font
 // Returns efontKR_12 for Korean, efontJA_12 for Japanese, efontCN_12 for Chinese, or nullptr for default
 const lgfx::U8g2font* detectAndGetFont(const String& text) {
@@ -350,6 +356,7 @@ void Task_TFT(void *pvParameters) {
       if (M5Cardputer.Keyboard.isKeyPressed('b')) {
         if (appState.browserMode) {
           appState.browserMode = false;
+          appState.showBrowserDeleteDialog = false;
           appState.currentSelectedIndex = appState.currentPlayingIndex;
           LOG_PRINTLN("Browser mode OFF");
         } else {
@@ -364,52 +371,148 @@ void Task_TFT(void *pvParameters) {
             appState.browserMode = true;
             appState.currentSelectedIndex = 0;
             appState.showDeleteDialog = false;
+            appState.showBrowserDeleteDialog = false;
             LOG_PRINTF("Browser mode ON (%s)\n", browserStartDir.c_str());
           }
         }
       }
 
       if (appState.browserMode) {
-        if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-          appState.currentSelectedIndex--;
-          if (appState.currentSelectedIndex < 0) {
-            appState.currentSelectedIndex = appState.browserEntryCount > 0 ? appState.browserEntryCount - 1 : 0;
-          }
-        }
-        if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-          appState.currentSelectedIndex++;
-          if (appState.currentSelectedIndex >= appState.browserEntryCount) appState.currentSelectedIndex = 0;
-        }
-        if (M5Cardputer.Keyboard.isKeyPressed('g')) {
-          if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), -1)) {
-            appState.browserMode = false;
-            resetClock();
-            appState.isPlaying = false;
-            appState.stopped = false;
-            appState.nextS = 1;
-            LOG_PRINTF("Play folder recursively: %s\n", appState.queueDirectory.c_str());
-          } else {
-            LOG_PRINTF("Folder has no playable songs: %s\n", appState.browserCurrentDir.c_str());
-          }
-        }
-        if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-          if (appState.browserEntryCount > 0 &&
-              appState.currentSelectedIndex >= 0 &&
-              appState.currentSelectedIndex < appState.browserEntryCount) {
-            int idx = appState.currentSelectedIndex;
-            if (appState.browserEntryIsDir[idx]) {
-              String targetDir = appState.browserEntryPath[idx];
-              if (!FileManager::buildBrowserEntries(SD, appState, targetDir.c_str())) {
-                LOG_PRINTF("Failed to enter folder: %s\n", targetDir.c_str());
+        if (appState.showBrowserDeleteDialog) {
+          if (M5Cardputer.Keyboard.isKeyPressed('y')) {
+            String targetPath = appState.browserDeleteTargetPath;
+            String browserDirBefore = appState.browserCurrentDir;
+            String queueDirBefore = appState.queueDirectory;
+            String playingPath;
+            bool hasPlayingPath = FileManager::getPathByQueueIndex(SD, appState, appState.currentPlayingIndex, playingPath);
+            bool playingWillBeDeleted = hasPlayingPath && pathInDirectoryRecursive(playingPath, targetPath);
+
+            if (FileManager::deletePathRecursive(SD, targetPath.c_str())) {
+              LOG_PRINTF("Deleted: %s\n", targetPath.c_str());
+              if (!FileManager::rebuildLibraryIndex(SD, MUSIC_DIR, LIBRARY_SCAN_MAX_DEPTH, appState)) {
+                (void)FileManager::rebuildLibraryIndex(SD, "/", LIBRARY_SCAN_MAX_DEPTH, appState);
               }
-            } else {
-              int songIndex = appState.browserEntrySongIndex[idx];
-              if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), songIndex)) {
-                appState.browserMode = false;
+              if (appState.libraryCount == 0) {
+                (void)FileManager::rebuildLibraryIndex(SD, "/", LIBRARY_SCAN_MAX_DEPTH, appState);
+              }
+              if (!FileManager::buildQueueForDirectory(SD, appState, queueDirBefore.c_str(), -1)) {
+                if (!FileManager::buildQueueForDirectory(SD, appState, MUSIC_DIR, -1)) {
+                  (void)FileManager::buildQueueForDirectory(SD, appState, "/", -1);
+                }
+              }
+
+              if (appState.fileCount <= 0) {
+                appState.isPlaying = false;
+                appState.stopped = true;
+                appState.currentSelectedIndex = 0;
+                appState.currentPlayingIndex = 0;
+              } else if (playingWillBeDeleted) {
+                appState.currentSelectedIndex = 0;
+                appState.currentPlayingIndex = 0;
                 resetClock();
                 appState.isPlaying = false;
                 appState.stopped = false;
                 appState.nextS = 1;
+              } else if (hasPlayingPath) {
+                int keepQueueIndex = FileManager::findQueueIndexByPath(SD, appState, playingPath);
+                if (keepQueueIndex >= 0) {
+                  appState.currentSelectedIndex = keepQueueIndex;
+                  appState.currentPlayingIndex = keepQueueIndex;
+                }
+              }
+
+              String refreshDir = browserDirBefore;
+              if (pathInDirectoryRecursive(browserDirBefore, targetPath)) {
+                refreshDir = getParentDirectory(targetPath);
+              }
+              if (!FileManager::buildBrowserEntries(SD, appState, refreshDir.c_str())) {
+                (void)FileManager::buildBrowserEntries(SD, appState, "/");
+              }
+            } else {
+              LOG_PRINTF("Delete failed: %s\n", targetPath.c_str());
+            }
+            appState.showBrowserDeleteDialog = false;
+            appState.browserDeleteTargetIsDir = false;
+            appState.browserDeleteTargetPath = "";
+            appState.browserDeleteTargetName = "";
+          }
+          if (M5Cardputer.Keyboard.isKeyPressed('c')) {
+            appState.showBrowserDeleteDialog = false;
+            appState.browserDeleteTargetIsDir = false;
+            appState.browserDeleteTargetPath = "";
+            appState.browserDeleteTargetName = "";
+            LOG_PRINTLN("Browser delete cancelled");
+          }
+        } else {
+          if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+            appState.currentSelectedIndex--;
+            if (appState.currentSelectedIndex < 0) {
+              appState.currentSelectedIndex = appState.browserEntryCount > 0 ? appState.browserEntryCount - 1 : 0;
+            }
+          }
+          if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+            appState.currentSelectedIndex++;
+            if (appState.currentSelectedIndex >= appState.browserEntryCount) appState.currentSelectedIndex = 0;
+          }
+          if (M5Cardputer.Keyboard.isKeyPressed('d')) {
+            if (appState.browserEntryCount > 0 &&
+                appState.currentSelectedIndex >= 0 &&
+                appState.currentSelectedIndex < appState.browserEntryCount) {
+              int idx = appState.currentSelectedIndex;
+              String targetPath = appState.browserEntryPath[idx];
+              String targetName = appState.browserEntryName[idx];
+              if (targetName == "..") {
+                LOG_PRINTLN("Cannot delete parent navigation entry");
+              } else if (appState.browserEntryIsDir[idx]) {
+                appState.showBrowserDeleteDialog = true;
+                appState.browserDeleteTargetIsDir = true;
+                appState.browserDeleteTargetPath = targetPath;
+                appState.browserDeleteTargetName = targetName;
+                LOG_PRINTF("Browser delete dialog shown for folder: %s\n", targetPath.c_str());
+              } else {
+                LOG_PRINTLN("Browser delete supports folders only");
+              }
+            }
+          }
+          if (M5Cardputer.Keyboard.isKeyPressed('g')) {
+            if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), -1)) {
+              appState.browserMode = false;
+              resetClock();
+              appState.isPlaying = false;
+              appState.stopped = false;
+              appState.nextS = 1;
+              LOG_PRINTF("Play folder recursively: %s\n", appState.queueDirectory.c_str());
+            } else {
+              LOG_PRINTF("Folder has no playable songs: %s\n", appState.browserCurrentDir.c_str());
+            }
+          }
+          if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
+            if (appState.browserEntryCount > 0 &&
+                appState.currentSelectedIndex >= 0 &&
+                appState.currentSelectedIndex < appState.browserEntryCount) {
+              int idx = appState.currentSelectedIndex;
+              if (appState.browserEntryIsDir[idx]) {
+                String targetDir = appState.browserEntryPath[idx];
+                if (!FileManager::buildBrowserEntries(SD, appState, targetDir.c_str())) {
+                  LOG_PRINTF("Failed to enter folder: %s\n", targetDir.c_str());
+                }
+              } else {
+                String targetPath = appState.browserEntryPath[idx];
+                int songIndex = appState.browserEntrySongIndex[idx];
+                if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), songIndex)) {
+                  if (songIndex < 0 && targetPath.length() > 0) {
+                    int queueIndex = FileManager::findQueueIndexByPath(SD, appState, targetPath);
+                    if (queueIndex >= 0) {
+                      appState.currentSelectedIndex = queueIndex;
+                      appState.currentPlayingIndex = queueIndex;
+                    }
+                  }
+                  appState.browserMode = false;
+                  resetClock();
+                  appState.isPlaying = false;
+                  appState.stopped = false;
+                  appState.nextS = 1;
+                }
               }
             }
           }

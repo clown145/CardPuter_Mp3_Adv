@@ -635,6 +635,27 @@ void drawMainView(M5Canvas& sprite,
       }
       sprite.drawString("Y:Yes  C:Cancel", 30, 75);
     }
+    if (appState.showBrowserDeleteDialog && appState.browserMode) {
+      sprite.fillRect(20, 40, 200, 70, BLACK);
+      sprite.drawRect(20, 40, 200, 70, WHITE);
+      sprite.setTextFont(0);
+      sprite.setTextColor(WHITE, BLACK);
+      sprite.setTextDatum(0);
+      sprite.drawString("Delete folder?", 30, 45);
+      String folderName = appState.browserDeleteTargetName;
+      if (folderName.length() > FILENAME_DISPLAY_MAX_LENGTH) {
+        folderName = folderName.substring(0, FILENAME_DISPLAY_MAX_LENGTH);
+      }
+      const lgfx::U8g2font* detectedFont = detectAndGetFont(folderName);
+      if (detectedFont) {
+        sprite.setFont(detectedFont);
+      } else {
+        sprite.setTextFont(0);
+      }
+      sprite.drawString(folderName, 30, 57);
+      sprite.setTextFont(0);
+      sprite.drawString("Y:Yes  C:Cancel", 30, 75);
+    }
     sprite.pushSprite(0, 0);
   }
   appState.graphSpeed++;

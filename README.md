@@ -65,9 +65,11 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
   - Proper index management after deletion
 - **Folder Browser**:
   - Press `B` to enter/exit directory browsing mode
+  - Browser reads real SD directory entries (not only indexed music folders)
   - `Enter` on folder: navigate into that folder
   - `Enter` on song: switch to that folder's playback queue and start playback
   - `G` in browser mode: play all songs under current folder (recursive)
+  - `D` on folder in browser mode: open delete confirmation and delete folder recursively
   - `DIR` indicator shown in mode area when browsing
 - **Screenshot Capture**: 
   - Press 'F' to capture current screen
@@ -128,6 +130,7 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 - **; / .** - Navigate entries in current folder
 - **ENTER** - Enter selected folder / play selected file's folder queue
 - **G** - Play current opened folder recursively (including subfolders)
+- **D** - Delete selected folder recursively (with confirmation dialog)
 
 ### Playback Mode
 - **M** - Toggle playback mode
@@ -143,6 +146,7 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 - **D** - Show delete confirmation dialog
   - **Y** - Confirm delete currently selected song
   - **C** - Cancel delete
+- In browser mode, `D` targets folders instead of songs
 
 ### Screenshot
 - **F** - Capture screenshot and save to SD card

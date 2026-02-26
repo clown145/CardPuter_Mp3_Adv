@@ -45,6 +45,12 @@ String extractDisplayName(const String& fullPath) {
   return fileName;
 }
 
+String extractBaseName(const String& fullPath) {
+  int lastSlash = fullPath.lastIndexOf('/');
+  if (lastSlash < 0) return fullPath;
+  return fullPath.substring(lastSlash + 1);
+}
+
 String getParentDir(const String& dir) {
   if (dir == "/") return "/";
   int lastSlash = dir.lastIndexOf('/');
@@ -78,7 +84,7 @@ bool addBrowserSongEntry(AppState& appState, int songIndex, const String& fullPa
   appState.browserEntryIsDir[idx] = false;
   appState.browserEntrySongIndex[idx] = songIndex;
   appState.browserEntryName[idx] = extractDisplayName(fullPath);
-  appState.browserEntryPath[idx] = "";
+  appState.browserEntryPath[idx] = fullPath;
   return true;
 }
 
@@ -141,8 +147,8 @@ bool readPathBySongIndex(fs::FS& fs, AppState& appState, int songIndex, String& 
   for (int i = 0; i < FILE_PATH_CACHE_SIZE; ++i) {
     if (appState.pathCacheIndices[i] == songIndex) {
       outPath = appState.pathCacheValues[i];
-  return outPath.length() > 0;
-}
+      return outPath.length() > 0;
+    }
   }
 
   File indexFile = fs.open(LIBRARY_INDEX_PATH, FILE_READ);
@@ -171,7 +177,19 @@ bool readPathBySongIndex(fs::FS& fs, AppState& appState, int songIndex, String& 
   return true;
 }
 
-int findQueueIndexByPath(fs::FS& fs, AppState& appState, const String& targetPath) {
+int findSongIndexByPath(fs::FS& fs, AppState& appState, const String& targetPath) {
+  if (targetPath.length() == 0) return -1;
+
+  String current;
+  for (int i = 0; i < appState.libraryCount; ++i) {
+    if (readPathBySongIndex(fs, appState, i, current) && current == targetPath) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+int findQueueIndexByPathInternal(fs::FS& fs, AppState& appState, const String& targetPath) {
   if (targetPath.length() == 0) return -1;
 
   String current;
@@ -181,6 +199,45 @@ int findQueueIndexByPath(fs::FS& fs, AppState& appState, const String& targetPat
     }
   }
   return -1;
+}
+
+bool removePathRecursive(fs::FS& fs, const String& targetPath) {
+  if (targetPath.length() == 0 || targetPath == "/") {
+    LOG_PRINTLN("Refusing to delete empty path or root");
+    return false;
+  }
+
+  File node = fs.open(targetPath.c_str());
+  if (!node) {
+    LOG_PRINTF("deletePathRecursive: open failed: %s\n", targetPath.c_str());
+    return false;
+  }
+
+  if (node.isDirectory()) {
+    File child = node.openNextFile();
+    while (child) {
+      String childPath = buildEntryPath(targetPath, child.name());
+      child.close();
+      if (!removePathRecursive(fs, childPath)) {
+        node.close();
+        return false;
+      }
+      child = node.openNextFile();
+    }
+    node.close();
+    if (!fs.rmdir(targetPath.c_str())) {
+      LOG_PRINTF("deletePathRecursive: failed to remove dir: %s\n", targetPath.c_str());
+      return false;
+    }
+    return true;
+  }
+
+  node.close();
+  if (!fs.remove(targetPath.c_str())) {
+    LOG_PRINTF("deletePathRecursive: failed to remove file: %s\n", targetPath.c_str());
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -251,6 +308,10 @@ bool getPathByQueueIndex(fs::FS& fs, AppState& appState, int queueIndex, String&
 
   int songIndex = static_cast<int>(appState.playbackQueue[queueIndex]);
   return readPathBySongIndex(fs, appState, songIndex, outPath);
+}
+
+int findQueueIndexByPath(fs::FS& fs, AppState& appState, const String& targetPath) {
+  return findQueueIndexByPathInternal(fs, appState, targetPath);
 }
 
 bool buildQueueForDirectory(fs::FS& fs, AppState& appState, const char* dirname, int preferredSongIndex) {
@@ -331,48 +392,37 @@ bool buildBrowserEntries(fs::FS& fs, AppState& appState, const char* dirname) {
     (void)addBrowserDirectoryEntry(appState, "..", parentDir);
   }
 
-  File indexFile = fs.open(LIBRARY_INDEX_PATH, FILE_READ);
-  if (!indexFile) {
-    LOG_PRINTF("buildBrowserEntries: index not found: %s\n", LIBRARY_INDEX_PATH);
+  File root = fs.open(dir.c_str());
+  if (!root || !root.isDirectory()) {
+    LOG_PRINTF("buildBrowserEntries: not a directory: %s\n", dir.c_str());
     return false;
   }
 
-  int songIndex = 0;
-  while (indexFile.available() && songIndex < appState.libraryCount && appState.browserEntryCount < MAX_BROWSER_ENTRIES) {
-    String line = indexFile.readStringUntil('\n');
-    line.trim();
-    if (line.length() == 0) continue;
-
-    if (!pathInDirectoryRecursive(line, dir)) {
-      songIndex++;
-      continue;
+  File entry = root.openNextFile();
+  while (entry && appState.browserEntryCount < MAX_BROWSER_ENTRIES) {
+    String entryPath = buildEntryPath(dir, entry.name());
+    if (entry.isDirectory()) {
+      String dirName = extractBaseName(entryPath);
+      if (!addBrowserDirectoryEntry(appState, dirName, entryPath)) {
+        break;
+      }
+    } else if (isSupportedAudioFile(entryPath)) {
+      int songIndex = findSongIndexByPath(fs, appState, entryPath);
+      if (!addBrowserSongEntry(appState, songIndex, entryPath)) {
+        break;
+      }
     }
-
-    String rel = "";
-    if (dir == "/") {
-      rel = line.substring(1);
-    } else {
-      rel = line.substring(dir.length() + 1);
-    }
-    if (rel.length() == 0) {
-      songIndex++;
-      continue;
-    }
-
-    int slashPos = rel.indexOf('/');
-    if (slashPos >= 0) {
-      String childDirName = rel.substring(0, slashPos);
-      String childDirPath = (dir == "/") ? String("/") + childDirName : dir + "/" + childDirName;
-      if (!addBrowserDirectoryEntry(appState, childDirName, childDirPath)) break;
-    } else {
-      if (!addBrowserSongEntry(appState, songIndex, line)) break;
-    }
-    songIndex++;
+    entry = root.openNextFile();
   }
-  indexFile.close();
+  root.close();
 
   LOG_PRINTF("Browser dir '%s': %d entries\n", dir.c_str(), appState.browserEntryCount);
   return true;
+}
+
+bool deletePathRecursive(fs::FS& fs, const char* path) {
+  String targetPath = normalizeDir(path);
+  return removePathRecursive(fs, targetPath);
 }
 
 void deleteCurrentFile(fs::FS& fs, AppState& appState, const Callbacks& callbacks) {
@@ -430,7 +480,7 @@ void deleteCurrentFile(fs::FS& fs, AppState& appState, const Callbacks& callback
 
   int newPlayingIndex = 0;
   if (!deletingPlayingSong && playingPath.length() > 0) {
-    int found = findQueueIndexByPath(fs, appState, playingPath);
+    int found = findQueueIndexByPathInternal(fs, appState, playingPath);
     if (found >= 0) {
       newPlayingIndex = found;
     }
