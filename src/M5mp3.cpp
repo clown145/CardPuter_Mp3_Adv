@@ -380,6 +380,18 @@ void Task_TFT(void *pvParameters) {
           appState.currentSelectedIndex++;
           if (appState.currentSelectedIndex >= appState.browserEntryCount) appState.currentSelectedIndex = 0;
         }
+        if (M5Cardputer.Keyboard.isKeyPressed('g')) {
+          if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), -1)) {
+            appState.browserMode = false;
+            resetClock();
+            appState.isPlaying = false;
+            appState.stopped = false;
+            appState.nextS = 1;
+            LOG_PRINTF("Play folder recursively: %s\n", appState.queueDirectory.c_str());
+          } else {
+            LOG_PRINTF("Folder has no playable songs: %s\n", appState.browserCurrentDir.c_str());
+          }
+        }
         if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
           if (appState.browserEntryCount > 0 &&
               appState.currentSelectedIndex >= 0 &&
@@ -387,7 +399,9 @@ void Task_TFT(void *pvParameters) {
             int idx = appState.currentSelectedIndex;
             if (appState.browserEntryIsDir[idx]) {
               String targetDir = appState.browserEntryPath[idx];
-              (void)FileManager::buildBrowserEntries(SD, appState, targetDir.c_str());
+              if (!FileManager::buildBrowserEntries(SD, appState, targetDir.c_str())) {
+                LOG_PRINTF("Failed to enter folder: %s\n", targetDir.c_str());
+              }
             } else {
               int songIndex = appState.browserEntrySongIndex[idx];
               if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), songIndex)) {

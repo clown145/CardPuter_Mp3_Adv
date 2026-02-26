@@ -67,6 +67,7 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
   - Press `B` to enter/exit directory browsing mode
   - `Enter` on folder: navigate into that folder
   - `Enter` on song: switch to that folder's playback queue and start playback
+  - `G` in browser mode: play all songs under current folder (recursive)
   - `DIR` indicator shown in mode area when browsing
 - **Screenshot Capture**: 
   - Press 'F' to capture current screen
@@ -126,6 +127,7 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 - **B** - Toggle folder browser mode
 - **; / .** - Navigate entries in current folder
 - **ENTER** - Enter selected folder / play selected file's folder queue
+- **G** - Play current opened folder recursively (including subfolders)
 
 ### Playback Mode
 - **M** - Toggle playback mode
