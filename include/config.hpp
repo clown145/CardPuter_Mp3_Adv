@@ -90,6 +90,7 @@ constexpr int MAX_BROWSER_ENTRIES = 256;
 constexpr int MAX_NETWORK_TRACKS = 80;
 constexpr uint8_t LIBRARY_SCAN_MAX_DEPTH = 32;
 constexpr const char* LIBRARY_INDEX_PATH = "/music/.cp_index.txt";
+constexpr const char* NETWORK_CONFIG_PATH = "/music/.cp_netcfg.txt";
 
 // Network playback
 constexpr int NETWORK_HTTP_TIMEOUT_MS = 12000;

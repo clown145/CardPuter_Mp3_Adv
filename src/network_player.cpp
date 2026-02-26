@@ -120,6 +120,13 @@ bool httpGet(const String& url,
     return false;
   }
 
+  // 198.18.0.0/15 is often used by fake-IP DNS proxy modes.
+  // ESP32 has no local proxy, so direct TCP to that range can return connection refused.
+  if (ip[0] == 198 && (ip[1] == 18 || ip[1] == 19)) {
+    outError = String("DNS fake-ip: ") + ip.toString() + " (disable fake-ip/proxy DNS)";
+    return false;
+  }
+
   bool isHttps = url.startsWith("https://");
   int lastCode = 0;
   String lastHttpError = "";

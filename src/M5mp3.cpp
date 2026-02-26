@@ -98,6 +98,74 @@ static void setNetworkStatus(const String& text) {
   LOG_PRINTF("[NET] %s\n", text.c_str());
 }
 
+static String sanitizeConfigValue(const String& input) {
+  String value = input;
+  value.replace("\r", "");
+  value.replace("\n", "");
+  return value;
+}
+
+static void saveNetworkConfig() {
+  if (SD.exists(NETWORK_CONFIG_PATH)) {
+    SD.remove(NETWORK_CONFIG_PATH);
+  }
+
+  File f = SD.open(NETWORK_CONFIG_PATH, FILE_WRITE);
+  if (!f) {
+    LOG_PRINTF("[NET] Save config failed: %s\n", NETWORK_CONFIG_PATH);
+    return;
+  }
+
+  auto writeKV = [&](const char* key, const String& value) {
+    f.print(key);
+    f.print("=");
+    f.println(sanitizeConfigValue(value));
+  };
+
+  writeKV("api_base_url", appState.networkApiBaseUrl);
+  writeKV("wifi_ssid", appState.networkWifiSsid);
+  writeKV("wifi_password", appState.networkWifiPassword);
+  writeKV("phone", appState.networkPhone);
+  writeKV("playlist_id", appState.networkPlaylistId);
+
+  f.close();
+  LOG_PRINTF("[NET] Config saved: %s\n", NETWORK_CONFIG_PATH);
+}
+
+static void loadNetworkConfig() {
+  if (!SD.exists(NETWORK_CONFIG_PATH)) return;
+
+  File f = SD.open(NETWORK_CONFIG_PATH, FILE_READ);
+  if (!f) {
+    LOG_PRINTF("[NET] Load config failed: %s\n", NETWORK_CONFIG_PATH);
+    return;
+  }
+
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    if (line.endsWith("\r")) {
+      line.remove(line.length() - 1);
+    }
+    if (line.length() == 0) continue;
+
+    int eq = line.indexOf('=');
+    if (eq <= 0) continue;
+
+    String key = line.substring(0, eq);
+    key.trim();
+    String value = line.substring(eq + 1);
+
+    if (key == "api_base_url") appState.networkApiBaseUrl = value;
+    else if (key == "wifi_ssid") appState.networkWifiSsid = value;
+    else if (key == "wifi_password") appState.networkWifiPassword = value;
+    else if (key == "phone") appState.networkPhone = value;
+    else if (key == "playlist_id") appState.networkPlaylistId = value;
+  }
+
+  f.close();
+  LOG_PRINTF("[NET] Config loaded: %s\n", NETWORK_CONFIG_PATH);
+}
+
 static String* getNetworkFieldByIndex(int index) {
   switch (index) {
     case 0: return &appState.networkApiBaseUrl;
@@ -187,6 +255,7 @@ static void handleNetworkPageInput() {
     }
     if (ks.enter) {
       appState.networkEditMode = false;
+      saveNetworkConfig();
       setNetworkStatus("Field saved");
     }
     return;
@@ -363,6 +432,7 @@ void setup() {
   if (!SD.begin(SD_CS)) {
     LOG_PRINTLN(F("ERROR: SD Mount Failed!"));
   }
+  loadNetworkConfig();
   // Load persistent library index; rebuild when index file is missing/invalid.
   if (!FileManager::loadLibraryIndex(SD, appState)) {
     FileManager::rebuildLibraryIndex(SD, MUSIC_DIR, LIBRARY_SCAN_MAX_DEPTH, appState);
