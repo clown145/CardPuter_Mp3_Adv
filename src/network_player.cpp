@@ -9,6 +9,8 @@ namespace NetworkPlayer {
 
 namespace {
 
+constexpr int kHttpRetryCount = 2;
+
 String trimCopy(const String& in) {
   String s = in;
   s.trim();
@@ -85,6 +87,18 @@ void mergeSetCookieHeader(String& jar, const String& headerValue) {
   }
 }
 
+String extractHostFromUrl(const String& url) {
+  int start = 0;
+  int scheme = url.indexOf("://");
+  if (scheme >= 0) start = scheme + 3;
+  int pathPos = url.indexOf('/', start);
+  String hostPort = pathPos >= 0 ? url.substring(start, pathPos) : url.substring(start);
+  int atPos = hostPort.lastIndexOf('@');
+  if (atPos >= 0) hostPort = hostPort.substring(atPos + 1);
+  int colonPos = hostPort.indexOf(':');
+  return colonPos > 0 ? hostPort.substring(0, colonPos) : hostPort;
+}
+
 bool httpGet(const String& url,
              const String& cookieJar,
              String& outBody,
@@ -94,55 +108,88 @@ bool httpGet(const String& url,
   outSetCookie = "";
   outError = "";
 
-  HTTPClient http;
-  http.setConnectTimeout(NETWORK_HTTP_TIMEOUT_MS);
-  http.setTimeout(NETWORK_HTTP_TIMEOUT_MS);
+  String host = extractHostFromUrl(url);
+  if (host.length() == 0) {
+    outError = "Invalid URL host";
+    return false;
+  }
+
+  IPAddress ip;
+  if (!WiFi.hostByName(host.c_str(), ip)) {
+    outError = String("DNS failed: ") + host;
+    return false;
+  }
 
   bool isHttps = url.startsWith("https://");
-  bool beginOk = false;
-  WiFiClient client;
-  WiFiClientSecure secureClient;
-  if (isHttps) {
-    secureClient.setInsecure();
-    beginOk = http.begin(secureClient, url);
-  } else {
-    beginOk = http.begin(client, url);
-  }
-  if (!beginOk) {
-    outError = "HTTP begin failed";
-    return false;
-  }
+  int lastCode = 0;
+  String lastHttpError = "";
+  for (int attempt = 0; attempt < kHttpRetryCount; ++attempt) {
+    HTTPClient http;
+    http.setConnectTimeout(NETWORK_HTTP_TIMEOUT_MS);
+    http.setTimeout(NETWORK_HTTP_TIMEOUT_MS);
+    http.setReuse(false);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.useHTTP10(true);
 
-  const char* headerKeys[] = {"Set-Cookie", "set-cookie"};
-  http.collectHeaders(headerKeys, 2);
-  if (cookieJar.length() > 0) {
-    http.addHeader("Cookie", cookieJar);
-  }
-
-  int code = http.GET();
-  outBody = http.getString();
-
-  int headerCount = http.headers();
-  for (int i = 0; i < headerCount; ++i) {
-    String name = http.headerName(i);
-    name.toLowerCase();
-    if (name == "set-cookie") {
-      if (outSetCookie.length() > 0) outSetCookie += "\n";
-      outSetCookie += http.header(i);
+    bool beginOk = false;
+    WiFiClient client;
+    WiFiClientSecure secureClient;
+    if (isHttps) {
+      secureClient.setInsecure();
+      secureClient.setTimeout((NETWORK_HTTP_TIMEOUT_MS + 999) / 1000);
+      beginOk = http.begin(secureClient, url);
+    } else {
+      beginOk = http.begin(client, url);
     }
+    if (!beginOk) {
+      lastHttpError = "HTTP begin failed";
+      delay(120);
+      continue;
+    }
+
+    const char* headerKeys[] = {"Set-Cookie", "set-cookie"};
+    http.collectHeaders(headerKeys, 2);
+    if (cookieJar.length() > 0) {
+      http.addHeader("Cookie", cookieJar);
+    }
+
+    int code = http.GET();
+    lastCode = code;
+    if (code > 0) {
+      outBody = http.getString();
+      int headerCount = http.headers();
+      for (int i = 0; i < headerCount; ++i) {
+        String name = http.headerName(i);
+        name.toLowerCase();
+        if (name == "set-cookie") {
+          if (outSetCookie.length() > 0) outSetCookie += "\n";
+          outSetCookie += http.header(i);
+        }
+      }
+      http.end();
+
+      if (code >= 200 && code < 300) {
+        return true;
+      }
+      lastHttpError = String("HTTP status: ") + String(code);
+      delay(120);
+      continue;
+    }
+
+    String detail = HTTPClient::errorToString(code);
+    http.end();
+    lastHttpError = String("HTTP GET failed: ") + String(code) + " " + detail;
+    delay(120);
   }
 
-  http.end();
-
-  if (code <= 0) {
-    outError = String("HTTP GET failed: ") + String(code);
-    return false;
+  if (lastHttpError.length() > 0) {
+    outError = lastHttpError;
+  } else if (lastCode != 0) {
+    outError = String("HTTP request failed: ") + String(lastCode);
+  } else {
+    outError = "HTTP request failed";
   }
-  if (code < 200 || code >= 300) {
-    outError = String("HTTP status: ") + String(code);
-    return false;
-  }
-  return true;
+  return false;
 }
 
 String getStringFromObject(const JsonObjectConst& obj,
