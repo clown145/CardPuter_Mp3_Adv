@@ -8,9 +8,11 @@
 
 //#define SDFATFS_USED  // activate for SdFat
 
-// Disable network features to reduce binary size (local file playback only)
-// Uncomment to disable: HTTP/HTTPS streams, TTS, playlists, ICY metadata
+// Disable network features by default to reduce binary size (local file playback only).
+// Define AUDIO_ENABLE_NETWORK in build flags to keep stream APIs enabled.
+#ifndef AUDIO_ENABLE_NETWORK
 #define AUDIO_NO_NETWORK
+#endif
 
 #pragma once
 #pragma GCC optimize ("Ofast")
