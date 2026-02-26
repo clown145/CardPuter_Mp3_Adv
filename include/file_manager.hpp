@@ -15,9 +15,17 @@ struct Callbacks {
   void (*onFileDeleted)(int deletedIndex, int newPlayingIndex) = nullptr;
 };
 
-// List audio files from directory and populate appState.audioFiles
-// Supports recursive directory scanning
+// Backward-compatible entry: rebuild index from dirname and load playback queue
 void listFiles(fs::FS& fs, const char* dirname, uint8_t levels, AppState& appState);
+
+// Build / reload library index from a directory tree and rebuild playback queue
+bool rebuildLibraryIndex(fs::FS& fs, const char* dirname, uint8_t levels, AppState& appState);
+
+// Load existing library index into memory offsets and rebuild playback queue
+bool loadLibraryIndex(fs::FS& fs, AppState& appState);
+
+// Read full file path from current playback queue index
+bool getPathByQueueIndex(fs::FS& fs, AppState& appState, int queueIndex, String& outPath);
 
 // Delete currently selected file from SD card and update appState
 // Handles index adjustments, playback state, and triggers callbacks
@@ -28,4 +36,3 @@ void deleteCurrentFile(fs::FS& fs, AppState& appState, const Callbacks& callback
 void captureScreenshot(fs::FS& fs, M5Canvas& sprite, ESP32Time& rtc);
 
 }  // namespace FileManager
-

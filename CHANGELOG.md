@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Persistent library index file (`/music/.cp_index.txt`) for large music collections
+- Playback queue model (`queue index -> song index -> file path`) as groundwork for folder playback mode
+
+### Changed
+- Replaced fixed 100-song in-memory list with indexed library loading
+- Increased indexed song capacity to 4096 entries
+
 ## [2.2.0] - 2025-01-17
 
 ### Added
@@ -93,4 +103,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File list navigation
 - Volume and brightness control
 - Battery and time display
-

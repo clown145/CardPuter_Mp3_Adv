@@ -133,7 +133,7 @@ bool processDeleteAndScreenshot(AppState& appState, const Actions& actions) {
   if (M5Cardputer.Keyboard.isKeyPressed('d')) {
     if (!appState.showDeleteDialog && appState.fileCount > 0 && appState.currentSelectedIndex < appState.fileCount) {
       appState.showDeleteDialog = true;
-      LOG_PRINTF("Delete dialog shown for: %s\n", appState.audioFiles[appState.currentSelectedIndex].c_str());
+      LOG_PRINTF("Delete dialog shown for queue index: %d\n", appState.currentSelectedIndex);
       needRedraw = true;
     }
   }
@@ -158,5 +158,4 @@ bool processDeleteAndScreenshot(AppState& appState, const Actions& actions) {
 }
 
 }  // namespace InputHandler
-
 

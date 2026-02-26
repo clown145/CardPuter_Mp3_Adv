@@ -211,11 +211,13 @@ void setup() {
   if (!SD.begin(SD_CS)) {
     LOG_PRINTLN(F("ERROR: SD Mount Failed!"));
   }
-  // Read song files from /music directory
-  FileManager::listFiles(SD, MUSIC_DIR, MAX_FILES, appState);
+  // Load persistent library index; rebuild when index file is missing/invalid.
+  if (!FileManager::loadLibraryIndex(SD, appState)) {
+    FileManager::rebuildLibraryIndex(SD, MUSIC_DIR, LIBRARY_SCAN_MAX_DEPTH, appState);
+  }
   if (appState.fileCount == 0) {
     LOG_PRINTLN("No files found in /music, scanning root as fallback");
-    FileManager::listFiles(SD, "/", MAX_FILES, appState);
+    FileManager::rebuildLibraryIndex(SD, "/", LIBRARY_SCAN_MAX_DEPTH, appState);
   }
   // Initialize AudioManager with the global Audio instance (must be before BoardInit)
   AudioManager::setAudioInstance(&audio);
@@ -236,35 +238,40 @@ void setup() {
   // Configure keyboard driver
   BoardInit::configureKeyboard(detected);
   if (appState.fileCount > 0) {
-    LOG_PRINTF("Trying to play: %s\n", appState.audioFiles[appState.currentSelectedIndex].c_str());
-    // Double-check the file exists
-    if (SD.exists(appState.audioFiles[appState.currentSelectedIndex])) {
-      // Open the file directly and print size + header bytes for verification
-      File f = SD.open(appState.audioFiles[appState.currentSelectedIndex]);
-      if (f) {
-        uint32_t sz = f.size();
-        LOG_PRINTF("SD open OK, size=%u bytes\n", (unsigned)sz);
-        // read first 12 bytes
-        uint8_t hdr[12];
-        int r = f.read(hdr, sizeof(hdr));
-        LOG_PRINTF("First %d bytes: ", r);
-        for (int i = 0; i < r; i++) LOG_PRINTF("%02X ", hdr[i]);
-        LOG_PRINTLN();
-        // Optional: detect ID3 and log a warning if a large tag may delay playback
-        if (r >= 3 && hdr[0] == 'I' && hdr[1] == 'D' && hdr[2] == '3') {
-          LOG_PRINTLN("Note: ID3 tag detected; initial parsing may delay audio start");
+    String selectedPath;
+    if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
+      LOG_PRINTF("Trying to play: %s\n", selectedPath.c_str());
+      // Double-check the file exists
+      if (SD.exists(selectedPath)) {
+        // Open the file directly and print size + header bytes for verification
+        File f = SD.open(selectedPath);
+        if (f) {
+          uint32_t sz = f.size();
+          LOG_PRINTF("SD open OK, size=%u bytes\n", (unsigned)sz);
+          // read first 12 bytes
+          uint8_t hdr[12];
+          int r = f.read(hdr, sizeof(hdr));
+          LOG_PRINTF("First %d bytes: ", r);
+          for (int i = 0; i < r; i++) LOG_PRINTF("%02X ", hdr[i]);
+          LOG_PRINTLN();
+          // Optional: detect ID3 and log a warning if a large tag may delay playback
+          if (r >= 3 && hdr[0] == 'I' && hdr[1] == 'D' && hdr[2] == '3') {
+            LOG_PRINTLN("Note: ID3 tag detected; initial parsing may delay audio start");
+          }
+          f.close();
+        } else {
+          LOG_PRINTLN("SD.open failed (could not read file)");
         }
-        f.close();
+        // Always connect; decoding + ID3 parsing should not depend on codec init state
+        AudioManager::connectToFile(SD, selectedPath.c_str());
+        appState.currentPlayingIndex = appState.currentSelectedIndex;  // Sync playing index on initialization
+        appState.isPlaying = true;
+        appState.stopped = false;
       } else {
-        LOG_PRINTLN("SD.open failed (could not read file)");
+        LOG_PRINTF("File not found on SD: %s\n", selectedPath.c_str());
       }
-      // Always connect; decoding + ID3 parsing should not depend on codec init state
-      AudioManager::connectToFile(SD, appState.audioFiles[appState.currentSelectedIndex].c_str());
-      appState.currentPlayingIndex = appState.currentSelectedIndex;  // Sync playing index on initialization
-      appState.isPlaying = true;
-      appState.stopped = false;
     } else {
-      LOG_PRINTF("File not found on SD: %s\n", appState.audioFiles[appState.currentSelectedIndex].c_str());
+      LOG_PRINTLN("Failed to resolve selected path from index");
     }
   } else {
     LOG_PRINTLN("No audio files found on SD - skipping connect");
@@ -388,17 +395,22 @@ void Task_Audio(void *pvParameters) {
 
     if (appState.nextS) {
       AudioManager::stop();
-      LOG_PRINTF("Task_Audio: next track requested: %s\n", appState.audioFiles[appState.currentSelectedIndex].c_str());
-      if (SD.exists(appState.audioFiles[appState.currentSelectedIndex])) {
-        // Reset ID3 metadata before opening the next file to avoid stale display
-        appState.resetID3Metadata();
-        AudioManager::connectToFile(SD, appState.audioFiles[appState.currentSelectedIndex].c_str());
-        appState.currentPlayingIndex = appState.currentSelectedIndex;  // Update actual playing index
-        // Reset audio info cache when switching songs (will be updated after decoder initializes)
-        appState.cachedAudioInfo = "";
-        appState.lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
+      String selectedPath;
+      if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
+        LOG_PRINTF("Task_Audio: next track requested: %s\n", selectedPath.c_str());
+        if (SD.exists(selectedPath)) {
+          // Reset ID3 metadata before opening the next file to avoid stale display
+          appState.resetID3Metadata();
+          AudioManager::connectToFile(SD, selectedPath.c_str());
+          appState.currentPlayingIndex = appState.currentSelectedIndex;  // Update actual playing index
+          // Reset audio info cache when switching songs (will be updated after decoder initializes)
+          appState.cachedAudioInfo = "";
+          appState.lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
+        } else {
+          LOG_PRINTF("Task_Audio: file not found: %s\n", selectedPath.c_str());
+        }
       } else {
-        LOG_PRINTF("Task_Audio: file not found: %s\n", appState.audioFiles[appState.currentSelectedIndex].c_str());
+        LOG_PRINTF("Task_Audio: failed to resolve queue index %d\n", appState.currentSelectedIndex);
       }
       appState.isPlaying = true;
       appState.stopped = false;  // Ensure playback is not stopped after switching tracks

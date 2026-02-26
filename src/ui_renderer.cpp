@@ -5,6 +5,7 @@
 #include "../include/config.hpp"
 #include "../include/image_utils.hpp"
 #include "../include/audio_manager.hpp"
+#include "../include/file_manager.hpp"
 #include <ESP32Time.h>
 #include "font.h"
 
@@ -22,6 +23,14 @@ static String extractDisplayName(const String& fullPath) {
     fileName = fileName.substring(0, lastDot);
   }
   return fileName;
+}
+
+static String getDisplayNameByQueueIndex(AppState& appState, int queueIndex) {
+  String path;
+  if (!FileManager::getPathByQueueIndex(SD, appState, queueIndex, path)) {
+    return String("[Missing]");
+  }
+  return extractDisplayName(path);
 }
 
 void drawId3Page(M5Canvas& sprite,
@@ -80,7 +89,7 @@ void drawId3Page(M5Canvas& sprite,
       sprite.setTextDatum(0);
     }
   } else if (localCoverSize == 0 && localCoverPos > 0) {
-    // Check if playing index is valid before accessing audioFiles array
+    // Check if playing index is valid before accessing queue entry
     // Also verify index hasn't changed (race condition protection)
     if (localPlayingIndex < 0 || localPlayingIndex >= appState.fileCount || 
         appState.currentPlayingIndex != localPlayingIndex) {
@@ -89,52 +98,58 @@ void drawId3Page(M5Canvas& sprite,
       return;  // Early return to avoid array out of bounds or stale data
     }
     
-    File f = SD.open(appState.audioFiles[localPlayingIndex]);
-    if (f) {
-      if (f.seek(localCoverPos)) {
-        const size_t scanMax = (localCoverLen > 0 && localCoverLen < COVER_SCAN_MAX) ? localCoverLen : (size_t)COVER_SCAN_MAX;
-        size_t startOff = 0;
-        ImageFormat fmt = ImageFormat::Unknown;
-        findImageStart(f, scanMax, startOff, fmt);
-        uint32_t imgW = 0, imgH = 0;
-        bool gotSize = getImageSize(f, localCoverPos + startOff, fmt, imgW, imgH);
-        f.seek(localCoverPos + startOff);
-        if (fmt != ImageFormat::Unknown) {
-          float scaleX = 1.0f;
-          float scaleY = 0.0f;  // 0.0 means follow scaleX (maintain aspect ratio)
-          
-          if (gotSize && imgW > 0 && imgH > 0) {
-            float sx = (float)coverW / (float)imgW;
-            float sy = (float)coverH / (float)imgH;
-            scaleX = sx < sy ? sx : sy;  // Use smaller scale to fit both dimensions
-            if (scaleX <= 0.0f || scaleX > 1.0f) scaleX = 1.0f;
+    String playingPath;
+    if (FileManager::getPathByQueueIndex(SD, appState, localPlayingIndex, playingPath)) {
+      File f = SD.open(playingPath);
+      if (f) {
+        if (f.seek(localCoverPos)) {
+          const size_t scanMax = (localCoverLen > 0 && localCoverLen < COVER_SCAN_MAX) ? localCoverLen : (size_t)COVER_SCAN_MAX;
+          size_t startOff = 0;
+          ImageFormat fmt = ImageFormat::Unknown;
+          findImageStart(f, scanMax, startOff, fmt);
+          uint32_t imgW = 0, imgH = 0;
+          bool gotSize = getImageSize(f, localCoverPos + startOff, fmt, imgW, imgH);
+          f.seek(localCoverPos + startOff);
+          if (fmt != ImageFormat::Unknown) {
+            float scaleX = 1.0f;
+            float scaleY = 0.0f;  // 0.0 means follow scaleX (maintain aspect ratio)
+
+            if (gotSize && imgW > 0 && imgH > 0) {
+              float sx = (float)coverW / (float)imgW;
+              float sy = (float)coverH / (float)imgH;
+              scaleX = sx < sy ? sx : sy;  // Use smaller scale to fit both dimensions
+              if (scaleX <= 0.0f || scaleX > 1.0f) scaleX = 1.0f;
+            } else {
+              // If we can't get dimensions, use fit-to-size mode (scale = 0 means fit)
+              scaleX = 0.0f;
+            }
+
+            if (fmt == ImageFormat::JPEG) {
+              sprite.drawJpg(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+            } else if (fmt == ImageFormat::PNG) {
+              sprite.drawPng(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+            } else if (fmt == ImageFormat::BMP) {
+              sprite.drawBmp(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+            } else if (fmt == ImageFormat::QOI) {
+              sprite.drawQoi(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+            }
           } else {
-            // If we can't get dimensions, use fit-to-size mode (scale = 0 means fit)
-            scaleX = 0.0f;
-          }
-          
-          if (fmt == ImageFormat::JPEG) {
-            sprite.drawJpg(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
-          } else if (fmt == ImageFormat::PNG) {
-            sprite.drawPng(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
-          } else if (fmt == ImageFormat::BMP) {
-            sprite.drawBmp(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
-          } else if (fmt == ImageFormat::QOI) {
-            sprite.drawQoi(&f, coverX, coverY, coverW, coverH, 0, 0, scaleX, scaleY);
+            sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
+            sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
+            sprite.setTextColor(grays[14], grays[4]);
+            sprite.setTextDatum(4);
+            sprite.drawString(PLACEHOLDER_NO_COVER, coverX + coverW/2, coverY + coverH/2);
+            sprite.setTextDatum(0);
           }
         } else {
           sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
           sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
-          sprite.setTextColor(grays[14], grays[4]);
-          sprite.setTextDatum(4);
-          sprite.drawString(PLACEHOLDER_NO_COVER, coverX + coverW/2, coverY + coverH/2);
-          sprite.setTextDatum(0);
         }
+        f.close();
       } else {
         sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
         sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
       }
-      f.close();
     } else {
       sprite.fillRect(coverX, coverY, coverW, coverH, grays[4]);
       sprite.drawRect(coverX, coverY, coverW, coverH, grays[10]);
@@ -394,7 +409,7 @@ void drawMainView(M5Canvas& sprite,
           } else {
             sprite.setTextColor(GREEN, BLACK);
           }
-          String fileName = extractDisplayName(appState.audioFiles[i]);
+          String fileName = getDisplayNameByQueueIndex(appState, i);
           const lgfx::U8g2font* detectedFont = detectAndGetFont(fileName);
           if (detectedFont) {
             sprite.setFont(detectedFont);
@@ -435,7 +450,7 @@ void drawMainView(M5Canvas& sprite,
           } else {
             sprite.setTextColor(GREEN, BLACK);
           }
-          String fileName = extractDisplayName(appState.audioFiles[i]);
+          String fileName = getDisplayNameByQueueIndex(appState, i);
           const lgfx::U8g2font* detectedFont = detectAndGetFont(fileName);
           if (detectedFont) {
             sprite.setFont(detectedFont);
@@ -561,7 +576,7 @@ void drawMainView(M5Canvas& sprite,
       sprite.setTextDatum(0);
       sprite.drawString("Delete song?", 30, 45);
       if (appState.currentSelectedIndex < appState.fileCount) {
-        String fileName = extractDisplayName(appState.audioFiles[appState.currentSelectedIndex]);
+        String fileName = getDisplayNameByQueueIndex(appState, appState.currentSelectedIndex);
         if (fileName.length() > FILENAME_DISPLAY_MAX_LENGTH) {
           fileName = fileName.substring(0, FILENAME_DISPLAY_MAX_LENGTH);
         }
@@ -583,5 +598,3 @@ void drawMainView(M5Canvas& sprite,
 }
 
 }  // namespace UiRenderer
-
-

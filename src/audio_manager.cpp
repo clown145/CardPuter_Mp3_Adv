@@ -3,6 +3,7 @@
 #include <SD.h>
 #include "../include/audio_manager.hpp"
 #include "../include/config.hpp"
+#include "../include/file_manager.hpp"
 #include "M5Cardputer.h"
 #include <ESP32Time.h>
 
@@ -154,6 +155,11 @@ void onEOF(const char* info, AppState& appState, fs::FS& fs) {
   resetClock();
   LOG_PRINT("eof_mp3     ");
   LOG_PRINTLN(info);
+
+  if (appState.fileCount <= 0) {
+    LOG_PRINTLN("eof: queue is empty");
+    return;
+  }
   
   // Determine next song based on playback mode
   if (appState.playMode == PlaybackMode::Sequential) {
@@ -169,21 +175,25 @@ void onEOF(const char* info, AppState& appState, fs::FS& fs) {
   }
   
   appState.currentSelectedIndex = appState.currentPlayingIndex;  // Sync selected index to playing index
+  String nextPath;
+  if (!FileManager::getPathByQueueIndex(fs, appState, appState.currentPlayingIndex, nextPath)) {
+    LOG_PRINTF("eof: failed to resolve queue index %d\n", appState.currentPlayingIndex);
+    return;
+  }
   LOG_PRINTF("eof: opening next file: %s (index %d, mode %d)\n", 
-                appState.audioFiles[appState.currentPlayingIndex].c_str(), 
+                nextPath.c_str(),
                 appState.currentPlayingIndex, 
                 static_cast<int>(appState.playMode));
-  if (fs.exists(appState.audioFiles[appState.currentPlayingIndex])) {
-    connectToFile(fs, appState.audioFiles[appState.currentPlayingIndex].c_str());
+  if (fs.exists(nextPath)) {
+    connectToFile(fs, nextPath.c_str());
     // Reset audio info cache when auto-switching songs (will be updated after decoder initializes)
     appState.cachedAudioInfo = "";
     appState.lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
     // Reset ID3 metadata
     appState.resetID3Metadata();
   } else {
-    LOG_PRINTF("eof: next file not found: %s\n", appState.audioFiles[appState.currentPlayingIndex].c_str());
+    LOG_PRINTF("eof: next file not found: %s\n", nextPath.c_str());
   }
 }
 
 }  // namespace AudioManager
-

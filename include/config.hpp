@@ -83,8 +83,11 @@ constexpr int ID3_ICON_NEXT_X = ID3_ICON_PLAY_X + ID3_ICON_SIZE + ID3_ICON_GAP; 
 constexpr int MODE_X = 150;
 constexpr int MODE_Y = 63;
 
-// File limits
-constexpr int MAX_FILES = 100;
+// Library/index limits
+constexpr int MAX_LIBRARY_FILES = 4096;
+constexpr int FILE_PATH_CACHE_SIZE = 32;
+constexpr uint8_t LIBRARY_SCAN_MAX_DEPTH = 32;
+constexpr const char* LIBRARY_INDEX_PATH = "/music/.cp_index.txt";
 
 // Cover image scanning
 constexpr size_t COVER_SCAN_MAX = 4096;  // 4KB scan limit
@@ -305,4 +308,3 @@ constexpr int GRAYS_COUNT = 18;
 constexpr int GRAYS_START_COLOR = 214;  // Starting RGB value for grayscale palette
 constexpr int GRAYS_STEP = 13;          // Decrement step between grayscale levels
 constexpr int GRAYS_BLUE_OFFSET = 40;   // Blue channel offset for color565
-

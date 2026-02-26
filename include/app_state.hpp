@@ -63,13 +63,38 @@ struct AppState {
   int nextS = 0;  // Request to switch tracks
   bool volUp = false;
   
-  // File list
-  String audioFiles[MAX_FILES];
-  int fileCount = 0;
+  // Indexed library + playback queue
+  uint32_t libraryOffsets[MAX_LIBRARY_FILES] = {0};   // Song index -> offset in LIBRARY_INDEX_PATH
+  uint16_t playbackQueue[MAX_LIBRARY_FILES] = {0};    // Queue index -> song index
+  int libraryCount = 0;
+  int fileCount = 0;                                  // Queue size (kept for compatibility)
+  int pathCacheIndices[FILE_PATH_CACHE_SIZE] = {0};
+  String pathCacheValues[FILE_PATH_CACHE_SIZE];
+  int pathCacheWritePos = 0;
   
   // Helper methods
   int getBrightness() const {
     return BRIGHTNESS_VALUES[brightnessIndex];
+  }
+
+  void resetPathCache() {
+    pathCacheWritePos = 0;
+    for (int i = 0; i < FILE_PATH_CACHE_SIZE; ++i) {
+      pathCacheIndices[i] = -1;
+      pathCacheValues[i] = "";
+    }
+  }
+
+  void resetLibraryState() {
+    libraryCount = 0;
+    fileCount = 0;
+    currentSelectedIndex = 0;
+    currentPlayingIndex = 0;
+    for (int i = 0; i < MAX_LIBRARY_FILES; ++i) {
+      libraryOffsets[i] = 0;
+      playbackQueue[i] = 0;
+    }
+    resetPathCache();
   }
   
   void resetID3Metadata() {
@@ -87,4 +112,3 @@ struct AppState {
     }
   }
 };
-

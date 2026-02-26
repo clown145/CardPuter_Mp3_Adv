@@ -14,8 +14,8 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 
 ### Audio Playback
 - **Format Support**: MP3 and WAV audio formats
-- **Auto-Discovery**: Automatically scans `/music` directory (falls back to root if not found)
-- **Capacity**: Supports up to 100 songs
+- **Indexed Library**: Scans `/music` and stores an index file at `/music/.cp_index.txt` (falls back to root if needed)
+- **Capacity**: Supports up to 4096 indexed songs
 - **Playback Modes**:
   - **SEQ (Sequential)**: Plays songs in order, automatically advances to next
   - **RND (Random)**: Random song selection, avoids repeating current song
