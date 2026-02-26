@@ -85,6 +85,12 @@ static void deleteCurrentFileWrapper() {
   FileManager::deleteCurrentFile(SD, appState, fileCallbacks);
 }
 
+static String getParentDirectory(const String& path) {
+  int lastSlash = path.lastIndexOf('/');
+  if (lastSlash <= 0) return String("/");
+  return path.substring(0, lastSlash);
+}
+
 // Detect language from text and return appropriate font
 // Returns efontKR_12 for Korean, efontJA_12 for Japanese, efontCN_12 for Chinese, or nullptr for default
 const lgfx::U8g2font* detectAndGetFont(const String& text) {
@@ -215,9 +221,12 @@ void setup() {
   if (!FileManager::loadLibraryIndex(SD, appState)) {
     FileManager::rebuildLibraryIndex(SD, MUSIC_DIR, LIBRARY_SCAN_MAX_DEPTH, appState);
   }
-  if (appState.fileCount == 0) {
+  if (appState.libraryCount == 0) {
     LOG_PRINTLN("No files found in /music, scanning root as fallback");
     FileManager::rebuildLibraryIndex(SD, "/", LIBRARY_SCAN_MAX_DEPTH, appState);
+  }
+  if (!FileManager::buildQueueForDirectory(SD, appState, MUSIC_DIR, -1)) {
+    (void)FileManager::buildQueueForDirectory(SD, appState, "/", -1);
   }
   // Initialize AudioManager with the global Audio instance (must be before BoardInit)
   AudioManager::setAudioInstance(&audio);
@@ -338,7 +347,62 @@ void Task_TFT(void *pvParameters) {
     if (M5Cardputer.Keyboard.isChange()) {
       // Centralized handlers
       (void)InputHandler::processBasicToggles(appState);
-      (void)InputHandler::processPlaybackAndList(appState);
+      if (M5Cardputer.Keyboard.isKeyPressed('b')) {
+        if (appState.browserMode) {
+          appState.browserMode = false;
+          appState.currentSelectedIndex = appState.currentPlayingIndex;
+          LOG_PRINTLN("Browser mode OFF");
+        } else {
+          String browserStartDir = appState.queueDirectory;
+          if (appState.fileCount > 0 && appState.currentSelectedIndex >= 0 && appState.currentSelectedIndex < appState.fileCount) {
+            String selectedPath;
+            if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
+              browserStartDir = getParentDirectory(selectedPath);
+            }
+          }
+          if (FileManager::buildBrowserEntries(SD, appState, browserStartDir.c_str())) {
+            appState.browserMode = true;
+            appState.currentSelectedIndex = 0;
+            appState.showDeleteDialog = false;
+            LOG_PRINTF("Browser mode ON (%s)\n", browserStartDir.c_str());
+          }
+        }
+      }
+
+      if (appState.browserMode) {
+        if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+          appState.currentSelectedIndex--;
+          if (appState.currentSelectedIndex < 0) {
+            appState.currentSelectedIndex = appState.browserEntryCount > 0 ? appState.browserEntryCount - 1 : 0;
+          }
+        }
+        if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+          appState.currentSelectedIndex++;
+          if (appState.currentSelectedIndex >= appState.browserEntryCount) appState.currentSelectedIndex = 0;
+        }
+        if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
+          if (appState.browserEntryCount > 0 &&
+              appState.currentSelectedIndex >= 0 &&
+              appState.currentSelectedIndex < appState.browserEntryCount) {
+            int idx = appState.currentSelectedIndex;
+            if (appState.browserEntryIsDir[idx]) {
+              String targetDir = appState.browserEntryPath[idx];
+              (void)FileManager::buildBrowserEntries(SD, appState, targetDir.c_str());
+            } else {
+              int songIndex = appState.browserEntrySongIndex[idx];
+              if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), songIndex)) {
+                appState.browserMode = false;
+                resetClock();
+                appState.isPlaying = false;
+                appState.stopped = false;
+                appState.nextS = 1;
+              }
+            }
+          }
+        }
+      } else {
+        (void)InputHandler::processPlaybackAndList(appState);
+      }
       InputHandler::Actions acts;
       acts.captureScreenshot = &captureScreenshotWrapper;
       acts.deleteCurrentFile = &deleteCurrentFileWrapper;

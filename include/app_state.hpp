@@ -71,6 +71,16 @@ struct AppState {
   int pathCacheIndices[FILE_PATH_CACHE_SIZE] = {0};
   String pathCacheValues[FILE_PATH_CACHE_SIZE];
   int pathCacheWritePos = 0;
+  String queueDirectory = MUSIC_DIR;                  // Current playback scope
+
+  // Folder browser state
+  bool browserMode = false;
+  String browserCurrentDir = MUSIC_DIR;
+  bool browserEntryIsDir[MAX_BROWSER_ENTRIES] = {0};
+  int browserEntrySongIndex[MAX_BROWSER_ENTRIES] = {0};  // -1 for directory entries
+  String browserEntryName[MAX_BROWSER_ENTRIES];
+  String browserEntryPath[MAX_BROWSER_ENTRIES];          // For directories: target dir
+  int browserEntryCount = 0;
   
   // Helper methods
   int getBrightness() const {
@@ -90,11 +100,25 @@ struct AppState {
     fileCount = 0;
     currentSelectedIndex = 0;
     currentPlayingIndex = 0;
+    queueDirectory = MUSIC_DIR;
     for (int i = 0; i < MAX_LIBRARY_FILES; ++i) {
       libraryOffsets[i] = 0;
       playbackQueue[i] = 0;
     }
     resetPathCache();
+    resetBrowserEntries();
+  }
+
+  void resetBrowserEntries() {
+    browserEntryCount = 0;
+    browserMode = false;
+    browserCurrentDir = MUSIC_DIR;
+    for (int i = 0; i < MAX_BROWSER_ENTRIES; ++i) {
+      browserEntryIsDir[i] = false;
+      browserEntrySongIndex[i] = -1;
+      browserEntryName[i] = "";
+      browserEntryPath[i] = "";
+    }
   }
   
   void resetID3Metadata() {

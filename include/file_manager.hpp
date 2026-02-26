@@ -27,6 +27,12 @@ bool loadLibraryIndex(fs::FS& fs, AppState& appState);
 // Read full file path from current playback queue index
 bool getPathByQueueIndex(fs::FS& fs, AppState& appState, int queueIndex, String& outPath);
 
+// Build playback queue from a target directory (recursive)
+bool buildQueueForDirectory(fs::FS& fs, AppState& appState, const char* dirname, int preferredSongIndex = -1);
+
+// Build folder browser entries (immediate children only)
+bool buildBrowserEntries(fs::FS& fs, AppState& appState, const char* dirname);
+
 // Delete currently selected file from SD card and update appState
 // Handles index adjustments, playback state, and triggers callbacks
 void deleteCurrentFile(fs::FS& fs, AppState& appState, const Callbacks& callbacks);

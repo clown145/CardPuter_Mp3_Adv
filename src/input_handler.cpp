@@ -57,6 +57,7 @@ bool processBasicToggles(AppState& appState) {
 
 bool processPlaybackAndList(AppState& appState) {
   bool needRedraw = false;
+  if (appState.browserMode) return false;
 
   // ';' previous in list
   if (M5Cardputer.Keyboard.isKeyPressed(';')) {
@@ -129,6 +130,13 @@ bool processPlaybackAndList(AppState& appState) {
 
 bool processDeleteAndScreenshot(AppState& appState, const Actions& actions) {
   bool needRedraw = false;
+  if (appState.browserMode) {
+    if (M5Cardputer.Keyboard.isKeyPressed('f')) {
+      if (actions.captureScreenshot) actions.captureScreenshot();
+      needRedraw = true;
+    }
+    return needRedraw;
+  }
   // 'd' open dialog
   if (M5Cardputer.Keyboard.isKeyPressed('d')) {
     if (!appState.showDeleteDialog && appState.fileCount > 0 && appState.currentSelectedIndex < appState.fileCount) {
@@ -158,4 +166,3 @@ bool processDeleteAndScreenshot(AppState& appState, const Actions& actions) {
 }
 
 }  // namespace InputHandler
-

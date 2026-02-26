@@ -63,6 +63,11 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
   - Smart deletion logic: continues playing if deleted song is not current
   - Automatic next song switch if current song is deleted
   - Proper index management after deletion
+- **Folder Browser**:
+  - Press `B` to enter/exit directory browsing mode
+  - `Enter` on folder: navigate into that folder
+  - `Enter` on song: switch to that folder's playback queue and start playback
+  - `DIR` indicator shown in mode area when browsing
 - **Screenshot Capture**: 
   - Press 'F' to capture current screen
   - Saves as 24-bit BMP format (240x135 pixels)
@@ -116,6 +121,11 @@ An advanced MP3 player based on M5Cardputer, featuring Chinese character display
 ### List Navigation
 - **;** - Navigate up (circular, jumps to last song when at first)
 - **.** - Navigate down (circular, jumps to first song when at last)
+
+### Folder Browser
+- **B** - Toggle folder browser mode
+- **; / .** - Navigate entries in current folder
+- **ENTER** - Enter selected folder / play selected file's folder queue
 
 ### Playback Mode
 - **M** - Toggle playback mode

@@ -33,6 +33,29 @@ static String getDisplayNameByQueueIndex(AppState& appState, int queueIndex) {
   return extractDisplayName(path);
 }
 
+static int getListCount(const AppState& appState) {
+  return appState.browserMode ? appState.browserEntryCount : appState.fileCount;
+}
+
+static bool isDirectoryEntry(const AppState& appState, int listIndex) {
+  if (!appState.browserMode) return false;
+  if (listIndex < 0 || listIndex >= appState.browserEntryCount) return false;
+  return appState.browserEntryIsDir[listIndex];
+}
+
+static String getDisplayNameByListIndex(AppState& appState, int listIndex) {
+  if (appState.browserMode) {
+    if (listIndex < 0 || listIndex >= appState.browserEntryCount) return String("");
+    String name = appState.browserEntryName[listIndex];
+    if (appState.browserEntryIsDir[listIndex]) {
+      if (name == "..") return "[..]";
+      return String("[") + name + "]";
+    }
+    return name;
+  }
+  return getDisplayNameByQueueIndex(appState, listIndex);
+}
+
 void drawId3Page(M5Canvas& sprite,
                  AppState& appState,
                  const unsigned short* grays,
@@ -332,13 +355,22 @@ void drawMainView(M5Canvas& sprite,
                   ESP32Time& rtc,
                   int (*getBatteryPercent)(),
                   const lgfx::U8g2font* (*detectAndGetFont)(const String&)) {
+  int listCount = getListCount(appState);
+  if (listCount <= 0) {
+    appState.currentSelectedIndex = 0;
+  } else {
+    if (appState.currentSelectedIndex < 0) appState.currentSelectedIndex = 0;
+    if (appState.currentSelectedIndex >= listCount) appState.currentSelectedIndex = listCount - 1;
+  }
+
   if (appState.graphSpeed == 0) {
     gray = grays[15];
     light = grays[11];
     sprite.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, gray);
     sprite.fillRect(LIST_BOX_X, LIST_BOX_Y, LIST_BOX_WIDTH, LIST_BOX_HEIGHT, BLACK);
     sprite.fillRect(SCROLLBAR_X, SCROLLBAR_Y, SCROLLBAR_WIDTH, SCROLLBAR_HEIGHT, SCROLLBAR_COLOR);
-    sliderPos = map(appState.currentSelectedIndex, 0, appState.fileCount, SCROLLBAR_Y, SCROLLBAR_Y + SCROLLBAR_HEIGHT - SCROLLBAR_THUMB_HEIGHT);
+    int sliderRange = listCount > 0 ? listCount : 1;
+    sliderPos = map(appState.currentSelectedIndex, 0, sliderRange, SCROLLBAR_Y, SCROLLBAR_Y + SCROLLBAR_HEIGHT - SCROLLBAR_THUMB_HEIGHT);
     sprite.fillRect(SCROLLBAR_X, sliderPos, SCROLLBAR_WIDTH, SCROLLBAR_THUMB_HEIGHT, grays[2]);
     sprite.fillRect(SCROLLBAR_X + SCROLLBAR_THUMB_INDICATOR_OFFSET, sliderPos + SCROLLBAR_THUMB_INDICATOR_OFFSET, SCROLLBAR_THUMB_INDICATOR_WIDTH, SCROLLBAR_THUMB_INDICATOR_HEIGHT, grays[16]);
     sprite.fillRect(STATUS_BAR_ORANGE_LINE1_X, STATUS_BAR_ORANGE_LINE1_Y, STATUS_BAR_ORANGE_LINE1_WIDTH, 2, ORANGE);
@@ -401,15 +433,17 @@ void drawMainView(M5Canvas& sprite,
     sprite.setTextDatum(0);
     if (appState.currentSelectedIndex < LIST_SCROLL_THRESHOLD)
       for (int i = 0; i < LIST_VISIBLE_LINES; i++) {
-        if (i < appState.fileCount) {
-          if (i == appState.currentPlayingIndex) {
+        if (i < listCount) {
+          if (!appState.browserMode && i == appState.currentPlayingIndex) {
             sprite.setTextColor(RED, BLACK);
           } else if (i == appState.currentSelectedIndex) {
             sprite.setTextColor(WHITE, BLACK);
+          } else if (isDirectoryEntry(appState, i)) {
+            sprite.setTextColor(YELLOW, BLACK);
           } else {
             sprite.setTextColor(GREEN, BLACK);
           }
-          String fileName = getDisplayNameByQueueIndex(appState, i);
+          String fileName = getDisplayNameByListIndex(appState, i);
           const lgfx::U8g2font* detectedFont = detectAndGetFont(fileName);
           if (detectedFont) {
             sprite.setFont(detectedFont);
@@ -442,15 +476,17 @@ void drawMainView(M5Canvas& sprite,
     int yos = 0;
     if (appState.currentSelectedIndex >= 3)
       for (int i = appState.currentSelectedIndex - 3; i < appState.currentSelectedIndex - 3 + 7; i++) {
-        if (i < appState.fileCount) {
-          if (i == appState.currentPlayingIndex) {
+        if (i < listCount) {
+          if (!appState.browserMode && i == appState.currentPlayingIndex) {
             sprite.setTextColor(RED, BLACK);
           } else if (i == appState.currentSelectedIndex) {
             sprite.setTextColor(WHITE, BLACK);
+          } else if (isDirectoryEntry(appState, i)) {
+            sprite.setTextColor(YELLOW, BLACK);
           } else {
             sprite.setTextColor(GREEN, BLACK);
           }
-          String fileName = getDisplayNameByQueueIndex(appState, i);
+          String fileName = getDisplayNameByListIndex(appState, i);
           const lgfx::U8g2font* detectedFont = detectAndGetFont(fileName);
           if (detectedFont) {
             sprite.setFont(detectedFont);
@@ -485,7 +521,13 @@ void drawMainView(M5Canvas& sprite,
     sprite.setTextColor(grays[1], gray);
     sprite.drawString("WINAMP", 150, 4);
     sprite.setTextColor(grays[2], gray);
-    sprite.drawString("LIST", 58, 0);
+    if (appState.browserMode) {
+      String dirLabel = appState.browserCurrentDir;
+      if (dirLabel.length() > 18) dirLabel = "..." + dirLabel.substring(dirLabel.length() - 15);
+      sprite.drawString(dirLabel, 6, 0);
+    } else {
+      sprite.drawString("LIST", 58, 0);
+    }
     sprite.setTextColor(grays[4], gray);
     sprite.drawString("VOL", 150, 80);
     sprite.drawString("LIG", 150, 122);
@@ -533,7 +575,9 @@ void drawMainView(M5Canvas& sprite,
     sprite.setTextColor(GREEN, BLACK);
     sprite.setTextDatum(0);
     String modeText = "";
-    if (appState.playMode == PlaybackMode::Sequential) {
+    if (appState.browserMode) {
+      modeText = "DIR";
+    } else if (appState.playMode == PlaybackMode::Sequential) {
       modeText = "SEQ";
     } else if (appState.playMode == PlaybackMode::Random) {
       modeText = "RND";
@@ -568,7 +612,7 @@ void drawMainView(M5Canvas& sprite,
       sprite.drawString(appState.cachedAudioInfo, 232, 63);
       sprite.setTextDatum(0);
     }
-    if (appState.showDeleteDialog) {
+    if (appState.showDeleteDialog && !appState.browserMode) {
       sprite.fillRect(20, 40, 200, 70, BLACK);
       sprite.drawRect(20, 40, 200, 70, WHITE);
       sprite.setTextFont(0);

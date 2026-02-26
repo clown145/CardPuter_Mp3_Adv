@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Persistent library index file (`/music/.cp_index.txt`) for large music collections
 - Playback queue model (`queue index -> song index -> file path`) as groundwork for folder playback mode
+- Folder browser mode (`B` key) to enter directories and play the selected folder queue
 
 ### Changed
 - Replaced fixed 100-song in-memory list with indexed library loading

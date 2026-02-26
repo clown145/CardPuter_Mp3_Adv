@@ -86,6 +86,7 @@ constexpr int MODE_Y = 63;
 // Library/index limits
 constexpr int MAX_LIBRARY_FILES = 4096;
 constexpr int FILE_PATH_CACHE_SIZE = 32;
+constexpr int MAX_BROWSER_ENTRIES = 256;
 constexpr uint8_t LIBRARY_SCAN_MAX_DEPTH = 32;
 constexpr const char* LIBRARY_INDEX_PATH = "/music/.cp_index.txt";
 

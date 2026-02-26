@@ -24,6 +24,7 @@ struct Actions {
 // - ';' '.' : move selection up/down (wrap around)
 // - 'n' 'p' : next/previous (respect playMode for random/seq)
 // - Enter   : request play selected
+// Browser mode is handled externally in M5mp3.cpp.
 //
 // Returns true if anything changed requiring redraw.
 bool processPlaybackAndList(AppState& appState);
@@ -38,5 +39,4 @@ bool processPlaybackAndList(AppState& appState);
 bool processDeleteAndScreenshot(AppState& appState, const Actions& actions);
 
 }  // namespace InputHandler
-
 
