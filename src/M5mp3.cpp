@@ -21,7 +21,6 @@
 #include "../include/board_init.hpp"    // Board / codec init (scaffold)
 #include "../include/audio_manager.hpp"  // Audio playback control
 #include "../include/file_manager.hpp"   // File operations (list, delete, screenshot)
-#include "../include/network_player.hpp" // Network playlist / login
 M5Canvas sprite(&M5Cardputer.Display);
 // Removed unused canvas: spr
 // Step 3: Centralized application state
@@ -92,233 +91,19 @@ static String getParentDirectory(const String& path) {
   return path.substring(0, lastSlash);
 }
 
-static void setNetworkStatus(const String& text) {
-  appState.networkStatusText = text;
-  appState.networkStatusUpdate = millis();
-  LOG_PRINTF("[NET] %s\n", text.c_str());
-}
-
-static String sanitizeConfigValue(const String& input) {
-  String value = input;
-  value.replace("\r", "");
-  value.replace("\n", "");
-  return value;
-}
-
-static void saveNetworkConfig() {
-  if (SD.exists(NETWORK_CONFIG_PATH)) {
-    SD.remove(NETWORK_CONFIG_PATH);
-  }
-
-  File f = SD.open(NETWORK_CONFIG_PATH, FILE_WRITE);
-  if (!f) {
-    LOG_PRINTF("[NET] Save config failed: %s\n", NETWORK_CONFIG_PATH);
-    return;
-  }
-
-  auto writeKV = [&](const char* key, const String& value) {
-    f.print(key);
-    f.print("=");
-    f.println(sanitizeConfigValue(value));
-  };
-
-  writeKV("api_base_url", appState.networkApiBaseUrl);
-  writeKV("wifi_ssid", appState.networkWifiSsid);
-  writeKV("wifi_password", appState.networkWifiPassword);
-  writeKV("phone", appState.networkPhone);
-  writeKV("playlist_id", appState.networkPlaylistId);
-
-  f.close();
-  LOG_PRINTF("[NET] Config saved: %s\n", NETWORK_CONFIG_PATH);
-}
-
-static void loadNetworkConfig() {
-  if (!SD.exists(NETWORK_CONFIG_PATH)) return;
-
-  File f = SD.open(NETWORK_CONFIG_PATH, FILE_READ);
-  if (!f) {
-    LOG_PRINTF("[NET] Load config failed: %s\n", NETWORK_CONFIG_PATH);
-    return;
-  }
-
-  while (f.available()) {
-    String line = f.readStringUntil('\n');
-    if (line.endsWith("\r")) {
-      line.remove(line.length() - 1);
-    }
-    if (line.length() == 0) continue;
-
-    int eq = line.indexOf('=');
-    if (eq <= 0) continue;
-
-    String key = line.substring(0, eq);
-    key.trim();
-    String value = line.substring(eq + 1);
-
-    if (key == "api_base_url") appState.networkApiBaseUrl = value;
-    else if (key == "wifi_ssid") appState.networkWifiSsid = value;
-    else if (key == "wifi_password") appState.networkWifiPassword = value;
-    else if (key == "phone") appState.networkPhone = value;
-    else if (key == "playlist_id") appState.networkPlaylistId = value;
-  }
-
-  f.close();
-  LOG_PRINTF("[NET] Config loaded: %s\n", NETWORK_CONFIG_PATH);
-}
-
-static String* getNetworkFieldByIndex(int index) {
-  switch (index) {
-    case 0: return &appState.networkApiBaseUrl;
-    case 1: return &appState.networkWifiSsid;
-    case 2: return &appState.networkWifiPassword;
-    case 3: return &appState.networkPhone;
-    case 4: return &appState.networkCode;
-    case 5: return &appState.networkPlaylistId;
-    default: return nullptr;
-  }
-}
-
-static void startNetworkPlaybackFromLoadedQueue() {
-  if (appState.networkTrackCount <= 0) {
-    setNetworkStatus("No network tracks loaded");
-    return;
-  }
-
-  if (!appState.networkMode) {
-    appState.localQueueDirSnapshot = appState.queueDirectory;
-    appState.localSelectedSnapshot = appState.currentSelectedIndex;
-    appState.localPlayingSnapshot = appState.currentPlayingIndex;
-    appState.hasLocalQueueSnapshot = true;
-  }
-
-  appState.networkMode = true;
-  appState.fileCount = appState.networkTrackCount;
-  appState.currentSelectedIndex = 0;
-  appState.currentPlayingIndex = 0;
-  appState.showDeleteDialog = false;
-  appState.browserMode = false;
-  appState.nextS = 1;
-  appState.isPlaying = false;
-  appState.stopped = false;
-  setNetworkStatus(String("NET play: ") + String(appState.networkTrackCount) + " tracks");
-}
-
-static void leaveNetworkModeAndRestoreLocalQueue() {
-  if (!appState.networkMode) {
-    setNetworkStatus("Already in local mode");
-    return;
-  }
-
-  appState.networkMode = false;
-  appState.nextS = 0;
-  appState.isPlaying = false;
-  appState.stopped = true;
-  AudioManager::stop();
-
-  String restoreDir = appState.hasLocalQueueSnapshot ? appState.localQueueDirSnapshot : String(MUSIC_DIR);
-  if (!FileManager::buildQueueForDirectory(SD, appState, restoreDir.c_str(), -1)) {
-    if (!FileManager::buildQueueForDirectory(SD, appState, MUSIC_DIR, -1)) {
-      (void)FileManager::buildQueueForDirectory(SD, appState, "/", -1);
-    }
-  }
-
-  if (appState.hasLocalQueueSnapshot && appState.fileCount > 0) {
-    if (appState.localSelectedSnapshot >= 0 && appState.localSelectedSnapshot < appState.fileCount) {
-      appState.currentSelectedIndex = appState.localSelectedSnapshot;
-    }
-    if (appState.localPlayingSnapshot >= 0 && appState.localPlayingSnapshot < appState.fileCount) {
-      appState.currentPlayingIndex = appState.localPlayingSnapshot;
-    }
-  }
-
-  appState.hasLocalQueueSnapshot = false;
-  setNetworkStatus("Back to local library");
-}
-
-static void handleNetworkPageInput() {
-  if (!M5Cardputer.Keyboard.isPressed()) return;
-
-  M5Cardputer.Keyboard.updateKeysState();
-  Keyboard_Class::KeysState ks = M5Cardputer.Keyboard.keysState();
-
-  if (appState.networkEditMode) {
-    String* field = getNetworkFieldByIndex(appState.networkSelectedField);
-    if (field) {
-      for (char c : ks.word) {
-        if (c >= 32 && c <= 126) {
-          *field += c;
-        }
-      }
-      if (ks.del && field->length() > 0) {
-        field->remove(field->length() - 1);
-      }
-    }
-    if (ks.enter) {
-      appState.networkEditMode = false;
-      saveNetworkConfig();
-      setNetworkStatus("Field saved");
-    }
-    return;
-  }
-
-  if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-    appState.networkSelectedField--;
-    if (appState.networkSelectedField < 0) appState.networkSelectedField = 5;
-  }
-  if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-    appState.networkSelectedField++;
-    if (appState.networkSelectedField > 5) appState.networkSelectedField = 0;
-  }
-  if (ks.enter || M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-    appState.networkEditMode = true;
-    setNetworkStatus("Editing field");
-  }
-
-  if (M5Cardputer.Keyboard.isKeyPressed('b')) {
-    appState.showNetworkPage = false;
-    appState.networkEditMode = false;
-    setNetworkStatus("Close NET page");
-  }
-
-  String msg;
-  if (M5Cardputer.Keyboard.isKeyPressed('1')) {
-    bool ok = NetworkPlayer::ensureWifiConnected(appState, msg);
-    setNetworkStatus(ok ? msg : String("WiFi failed: ") + msg);
-  }
-  if (M5Cardputer.Keyboard.isKeyPressed('2')) {
-    bool ok = NetworkPlayer::sendCaptcha(appState, msg);
-    setNetworkStatus(ok ? msg : String("Send code failed: ") + msg);
-  }
-  if (M5Cardputer.Keyboard.isKeyPressed('3')) {
-    bool ok = NetworkPlayer::loginByCaptcha(appState, msg);
-    setNetworkStatus(ok ? msg : String("Login failed: ") + msg);
-  }
-  if (M5Cardputer.Keyboard.isKeyPressed('4')) {
-    bool ok = NetworkPlayer::loadPlaylistTracks(appState, msg);
-    setNetworkStatus(ok ? msg : String("Load playlist failed: ") + msg);
-  }
-  if (M5Cardputer.Keyboard.isKeyPressed('5')) {
-    startNetworkPlaybackFromLoadedQueue();
-    appState.showNetworkPage = false;
-  }
-  if (M5Cardputer.Keyboard.isKeyPressed('6')) {
-    leaveNetworkModeAndRestoreLocalQueue();
-  }
-}
-
 // Detect language from text and return appropriate font
 // Returns efontKR_12 for Korean, efontJA_12 for Japanese, efontCN_12 for Chinese, or nullptr for default
 const lgfx::U8g2font* detectAndGetFont(const String& text) {
   if (text.length() == 0) return nullptr;
-
+  
   const uint8_t* utf8 = (const uint8_t*)text.c_str();
   bool hasKorean = false;
   bool hasJapanese = false;
   bool hasChinese = false;
-
+  
   while (*utf8) {
     uint32_t codePoint = 0;
-
+    
     // Decode UTF-8 character
     if ((*utf8 & 0x80) == 0) {
       // ASCII character (0x00-0x7F)
@@ -341,7 +126,7 @@ const lgfx::U8g2font* detectAndGetFont(const String& text) {
       utf8++;
       continue;
     }
-
+    
     // Check Unicode ranges
     if (codePoint >= 0xAC00 && codePoint <= 0xD7AF) {
       // Korean Hangul Syllables
@@ -358,11 +143,11 @@ const lgfx::U8g2font* detectAndGetFont(const String& text) {
         hasChinese = true;
       }
     }
-
+    
     // Early exit if we found Korean (highest priority)
     if (hasKorean) break;
   }
-
+  
   // Priority: Korean > Japanese > Chinese > Default
   if (hasKorean) {
     return &fonts::efontKR_12;
@@ -371,7 +156,7 @@ const lgfx::U8g2font* detectAndGetFont(const String& text) {
   } else if (hasChinese) {
     return &fonts::efontCN_12;
   }
-
+  
   return nullptr;  // Use default font for English/other languages
 }
 
@@ -383,13 +168,13 @@ static int getBatteryPercent() {
   // Try to use M5Cardputer's built-in Power API first (recommended for Advanced version)
   // This uses AXP2101 PMIC's internal battery gauge for accurate readings
   int level = M5Cardputer.Power.getBatteryLevel();
-
+  
   // If Power API returns valid value (0-100), use it
   // Returns -1 or -2 if not supported or error
   if (level >= 0 && level <= 100) {
     return level;
   }
-
+  
   // Fallback: Direct ADC reading (for Standard version or if PMIC not available)
   // This method uses voltage-to-percentage mapping which is less accurate
   // Voltage range: 3.3V (0%) to 4.2V (100%) is typical for Li-Po batteries
@@ -398,7 +183,7 @@ static int getBatteryPercent() {
   int raw = analogRead(BAT_ADC_PIN);
   float voltage = (raw / 4095.0f) * 3.3f * 2.0f; // 2:1 voltage divider assumption
   int mv = (int)(voltage * 1000.0f);
-
+  
   // Voltage-to-percentage mapping for Li-Po batteries
   // 3.3V = 0%, 4.2V = 100% (typical range)
   // Note: This is a linear approximation; actual battery discharge curve is non-linear
@@ -432,7 +217,6 @@ void setup() {
   if (!SD.begin(SD_CS)) {
     LOG_PRINTLN(F("ERROR: SD Mount Failed!"));
   }
-  loadNetworkConfig();
   // Load persistent library index; rebuild when index file is missing/invalid.
   if (!FileManager::loadLibraryIndex(SD, appState)) {
     FileManager::rebuildLibraryIndex(SD, MUSIC_DIR, LIBRARY_SCAN_MAX_DEPTH, appState);
@@ -447,19 +231,19 @@ void setup() {
   // Initialize AudioManager with the global Audio instance (must be before BoardInit)
   AudioManager::setAudioInstance(&audio);
   AudioManager::initialize(appState);
-
+  
   // Detect board variant and initialize audio hardware
   BoardInit::Variant detected = BoardInit::detectVariant();
   if (!BoardInit::initAudioForDetectedVariant(detected, audioBclkPin, audioLrckPin, audioDoutPin,
                                                hpDetectPin, ampEnablePin, codec_initialized, appState.volume)) {
     LOG_PRINTLN("[ERROR] Audio initialisation failed - leaving amplifier disabled");
   }
-
+  
   // Initialize lastHPState if headphone detect pin is available
   if (hpDetectPin >= 0) {
     lastHPState = (digitalRead(hpDetectPin) == LOW);
   }
-
+  
   // Configure keyboard driver
   BoardInit::configureKeyboard(detected);
   if (appState.fileCount > 0) {
@@ -488,15 +272,10 @@ void setup() {
           LOG_PRINTLN("SD.open failed (could not read file)");
         }
         // Always connect; decoding + ID3 parsing should not depend on codec init state
-        if (AudioManager::connectToFile(SD, selectedPath.c_str())) {
-          appState.currentPlayingIndex = appState.currentSelectedIndex;  // Sync playing index on initialization
-          appState.isPlaying = true;
-          appState.stopped = false;
-        } else {
-          LOG_PRINTF("Initial connect failed: %s\n", selectedPath.c_str());
-          appState.isPlaying = false;
-          appState.stopped = true;
-        }
+        AudioManager::connectToFile(SD, selectedPath.c_str());
+        appState.currentPlayingIndex = appState.currentSelectedIndex;  // Sync playing index on initialization
+        appState.isPlaying = true;
+        appState.stopped = false;
       } else {
         LOG_PRINTF("File not found on SD: %s\n", selectedPath.c_str());
       }
@@ -517,7 +296,7 @@ void setup() {
   appState.cachedTimeStr = rtc.getTime().substring(3, 8);
   appState.lastTimeUpdate = millis();
   appState.lastGraphUpdate = millis();
-
+  
   // Create tasks and pin them to different cores
   xTaskCreatePinnedToCore(Task_TFT, "Task_TFT", 20480, NULL, 2, NULL, 0);                  // Core 0
   xTaskCreatePinnedToCore(Task_Audio, "Task_Audio", 10240, NULL, 3, &handleAudioTask, 1);  // Core 1
@@ -552,11 +331,11 @@ void drawId3Page() {
 // (removed original implementation after extraction)
 
 void draw() {
-  if (appState.showID3Page && !appState.showNetworkPage) {
+  if (appState.showID3Page) {
     drawId3Page();
     return;
   }
-
+  
   // Delegate main view rendering to UiRenderer
   UiRenderer::drawMainView(sprite, appState, grays, gray, light, sliderPos, rtc, getBatteryPercent, detectAndGetFont);
 }
@@ -566,133 +345,111 @@ void Task_TFT(void *pvParameters) {
     M5Cardputer.update();
     // Check for key press events
     if (M5Cardputer.Keyboard.isChange()) {
-      if (M5Cardputer.Keyboard.isKeyPressed('w') && !appState.networkEditMode) {
-        appState.showNetworkPage = !appState.showNetworkPage;
-        if (appState.showNetworkPage) {
-          appState.browserMode = false;
-          appState.showDeleteDialog = false;
-          appState.networkEditMode = false;
-          setNetworkStatus("Open NET page");
-        } else {
-          setNetworkStatus("Close NET page");
-        }
-      }
-
-      if (appState.showNetworkPage) {
-        handleNetworkPageInput();
-      } else {
-        // Centralized handlers
-        (void)InputHandler::processBasicToggles(appState);
-
-        if (M5Cardputer.Keyboard.isKeyPressed('b')) {
-          if (appState.networkMode) {
-            leaveNetworkModeAndRestoreLocalQueue();
-          } else if (appState.browserMode) {
-            appState.browserMode = false;
-            appState.currentSelectedIndex = appState.currentPlayingIndex;
-            LOG_PRINTLN("Browser mode OFF");
-          } else {
-            String browserStartDir = appState.queueDirectory;
-            if (appState.fileCount > 0 &&
-                appState.currentSelectedIndex >= 0 &&
-                appState.currentSelectedIndex < appState.fileCount) {
-              String selectedPath;
-              if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
-                browserStartDir = getParentDirectory(selectedPath);
-              }
-            }
-            if (FileManager::buildBrowserEntries(SD, appState, browserStartDir.c_str())) {
-              appState.browserMode = true;
-              appState.currentSelectedIndex = 0;
-              appState.showDeleteDialog = false;
-              LOG_PRINTF("Browser mode ON (%s)\n", browserStartDir.c_str());
-            }
-          }
-        }
-
+      // Centralized handlers
+      (void)InputHandler::processBasicToggles(appState);
+      if (M5Cardputer.Keyboard.isKeyPressed('b')) {
         if (appState.browserMode) {
-          if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-            appState.currentSelectedIndex--;
-            if (appState.currentSelectedIndex < 0) {
-              appState.currentSelectedIndex = appState.browserEntryCount > 0 ? appState.browserEntryCount - 1 : 0;
+          appState.browserMode = false;
+          appState.currentSelectedIndex = appState.currentPlayingIndex;
+          LOG_PRINTLN("Browser mode OFF");
+        } else {
+          String browserStartDir = appState.queueDirectory;
+          if (appState.fileCount > 0 && appState.currentSelectedIndex >= 0 && appState.currentSelectedIndex < appState.fileCount) {
+            String selectedPath;
+            if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
+              browserStartDir = getParentDirectory(selectedPath);
             }
           }
-          if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-            appState.currentSelectedIndex++;
-            if (appState.currentSelectedIndex >= appState.browserEntryCount) appState.currentSelectedIndex = 0;
+          if (FileManager::buildBrowserEntries(SD, appState, browserStartDir.c_str())) {
+            appState.browserMode = true;
+            appState.currentSelectedIndex = 0;
+            appState.showDeleteDialog = false;
+            LOG_PRINTF("Browser mode ON (%s)\n", browserStartDir.c_str());
           }
-          if (M5Cardputer.Keyboard.isKeyPressed('g')) {
-            if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), -1)) {
-              appState.browserMode = false;
-              resetClock();
-              appState.isPlaying = false;
-              appState.stopped = false;
-              appState.nextS = 1;
-              LOG_PRINTF("Play folder recursively: %s\n", appState.queueDirectory.c_str());
+        }
+      }
+
+      if (appState.browserMode) {
+        if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+          appState.currentSelectedIndex--;
+          if (appState.currentSelectedIndex < 0) {
+            appState.currentSelectedIndex = appState.browserEntryCount > 0 ? appState.browserEntryCount - 1 : 0;
+          }
+        }
+        if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+          appState.currentSelectedIndex++;
+          if (appState.currentSelectedIndex >= appState.browserEntryCount) appState.currentSelectedIndex = 0;
+        }
+        if (M5Cardputer.Keyboard.isKeyPressed('g')) {
+          if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), -1)) {
+            appState.browserMode = false;
+            resetClock();
+            appState.isPlaying = false;
+            appState.stopped = false;
+            appState.nextS = 1;
+            LOG_PRINTF("Play folder recursively: %s\n", appState.queueDirectory.c_str());
+          } else {
+            LOG_PRINTF("Folder has no playable songs: %s\n", appState.browserCurrentDir.c_str());
+          }
+        }
+        if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
+          if (appState.browserEntryCount > 0 &&
+              appState.currentSelectedIndex >= 0 &&
+              appState.currentSelectedIndex < appState.browserEntryCount) {
+            int idx = appState.currentSelectedIndex;
+            if (appState.browserEntryIsDir[idx]) {
+              String targetDir = appState.browserEntryPath[idx];
+              if (!FileManager::buildBrowserEntries(SD, appState, targetDir.c_str())) {
+                LOG_PRINTF("Failed to enter folder: %s\n", targetDir.c_str());
+              }
             } else {
-              LOG_PRINTF("Folder has no playable songs: %s\n", appState.browserCurrentDir.c_str());
-            }
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-            if (appState.browserEntryCount > 0 &&
-                appState.currentSelectedIndex >= 0 &&
-                appState.currentSelectedIndex < appState.browserEntryCount) {
-              int idx = appState.currentSelectedIndex;
-              if (appState.browserEntryIsDir[idx]) {
-                String targetDir = appState.browserEntryPath[idx];
-                if (!FileManager::buildBrowserEntries(SD, appState, targetDir.c_str())) {
-                  LOG_PRINTF("Failed to enter folder: %s\n", targetDir.c_str());
-                }
-              } else {
-                int songIndex = appState.browserEntrySongIndex[idx];
-                if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), songIndex)) {
-                  appState.browserMode = false;
-                  resetClock();
-                  appState.isPlaying = false;
-                  appState.stopped = false;
-                  appState.nextS = 1;
-                }
+              int songIndex = appState.browserEntrySongIndex[idx];
+              if (FileManager::buildQueueForDirectory(SD, appState, appState.browserCurrentDir.c_str(), songIndex)) {
+                appState.browserMode = false;
+                resetClock();
+                appState.isPlaying = false;
+                appState.stopped = false;
+                appState.nextS = 1;
               }
             }
           }
-        } else {
-          (void)InputHandler::processPlaybackAndList(appState);
         }
-
-        InputHandler::Actions acts;
-        acts.captureScreenshot = &captureScreenshotWrapper;
-        acts.deleteCurrentFile = &deleteCurrentFileWrapper;
-        (void)InputHandler::processDeleteAndScreenshot(appState, acts);
-
-        if (M5Cardputer.Keyboard.isKeyPressed('a')) {
-          appState.isPlaying = !appState.isPlaying;
-          appState.stopped = !appState.stopped;
-        }  // Toggle the playback state
-        if (M5Cardputer.Keyboard.isKeyPressed('v')) {
-          appState.isPlaying = false;
-          appState.volUp = true;
-          appState.volume = appState.volume + 5;
-          if (appState.volume > 20) appState.volume = 5;
-        }
-        if (M5Cardputer.Keyboard.isKeyPressed('-')) {
-          // '-' key: Decrease appState.volume
-          appState.volUp = true;
-          appState.volume = appState.volume - 1;
-          if (appState.volume < 0) appState.volume = 0;
-        }
-        if (M5Cardputer.Keyboard.isKeyPressed('=')) {
-          // '=' key: Increase appState.volume
-          appState.volUp = true;
-          appState.volume = appState.volume + 1;
-          if (appState.volume > 21) appState.volume = 21;
-        }
-        if (M5Cardputer.Keyboard.isKeyPressed('l')) {
-          appState.brightnessIndex++;
-          if (appState.brightnessIndex == 5) appState.brightnessIndex = 0;
-          M5Cardputer.Display.setBrightness(BRIGHTNESS_VALUES[appState.brightnessIndex]);
-        }
-        // All other keys handled by InputHandler
+      } else {
+        (void)InputHandler::processPlaybackAndList(appState);
       }
+      InputHandler::Actions acts;
+      acts.captureScreenshot = &captureScreenshotWrapper;
+      acts.deleteCurrentFile = &deleteCurrentFileWrapper;
+      (void)InputHandler::processDeleteAndScreenshot(appState, acts);
+
+      if (M5Cardputer.Keyboard.isKeyPressed('a')) {
+        appState.isPlaying = !appState.isPlaying;
+        appState.stopped = !appState.stopped;
+      }  // Toggle the playback state
+      if (M5Cardputer.Keyboard.isKeyPressed('v')) {
+        appState.isPlaying = false;
+        appState.volUp = true;
+        appState.volume = appState.volume + 5;
+        if (appState.volume > 20) appState.volume = 5;
+      }
+      if (M5Cardputer.Keyboard.isKeyPressed('-')) {
+        // '-' key: Decrease appState.volume
+        appState.volUp = true;
+        appState.volume = appState.volume - 1;
+        if (appState.volume < 0) appState.volume = 0;
+      }
+      if (M5Cardputer.Keyboard.isKeyPressed('=')) {
+        // '=' key: Increase appState.volume
+        appState.volUp = true;
+        appState.volume = appState.volume + 1;
+        if (appState.volume > 21) appState.volume = 21;
+      }
+      if (M5Cardputer.Keyboard.isKeyPressed('l')) {
+        appState.brightnessIndex++;
+        if (appState.brightnessIndex == 5) appState.brightnessIndex = 0;
+        M5Cardputer.Display.setBrightness(BRIGHTNESS_VALUES[appState.brightnessIndex]);
+      }
+      // All other keys handled by InputHandler
     }
     // If screen is off, skip drawing to save CPU
     if (!appState.screenOff) {
@@ -716,61 +473,25 @@ void Task_Audio(void *pvParameters) {
 
     if (appState.nextS) {
       AudioManager::stop();
-      bool connected = false;
-      String failReason = "";
-
-      if (appState.networkMode) {
-        String streamUrl;
-        String message;
-        if (NetworkPlayer::resolveTrackUrl(appState, appState.currentSelectedIndex, streamUrl, message)) {
-          LOG_PRINTF("Task_Audio: net track request index=%d\n", appState.currentSelectedIndex);
+      String selectedPath;
+      if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
+        LOG_PRINTF("Task_Audio: next track requested: %s\n", selectedPath.c_str());
+        if (SD.exists(selectedPath)) {
+          // Reset ID3 metadata before opening the next file to avoid stale display
           appState.resetID3Metadata();
-          appState.id3Title = appState.networkTrackTitle[appState.currentSelectedIndex];
-          appState.id3Artist = appState.networkTrackArtist[appState.currentSelectedIndex];
-          connected = AudioManager::connectToHost(streamUrl.c_str());
-          if (connected) {
-            appState.currentPlayingIndex = appState.currentSelectedIndex;
-            appState.cachedAudioInfo = "";
-            appState.lastAudioInfoUpdate = millis();
-          } else {
-            failReason = "connect host failed";
-          }
+          AudioManager::connectToFile(SD, selectedPath.c_str());
+          appState.currentPlayingIndex = appState.currentSelectedIndex;  // Update actual playing index
+          // Reset audio info cache when switching songs (will be updated after decoder initializes)
+          appState.cachedAudioInfo = "";
+          appState.lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
         } else {
-          LOG_PRINTF("Task_Audio: net resolve failed: %s\n", message.c_str());
-          failReason = message;
-          setNetworkStatus(String("Resolve failed: ") + message);
+          LOG_PRINTF("Task_Audio: file not found: %s\n", selectedPath.c_str());
         }
       } else {
-        String selectedPath;
-        if (FileManager::getPathByQueueIndex(SD, appState, appState.currentSelectedIndex, selectedPath)) {
-          LOG_PRINTF("Task_Audio: next track requested: %s\n", selectedPath.c_str());
-          if (SD.exists(selectedPath)) {
-            // Reset ID3 metadata before opening the next file to avoid stale display
-            appState.resetID3Metadata();
-            connected = AudioManager::connectToFile(SD, selectedPath.c_str());
-            if (connected) {
-              appState.currentPlayingIndex = appState.currentSelectedIndex;  // Update actual playing index
-              // Reset audio info cache when switching songs (will be updated after decoder initializes)
-              appState.cachedAudioInfo = "";
-              appState.lastAudioInfoUpdate = millis();  // Reset timer to allow decoder initialization time
-            } else {
-              failReason = "connect file failed";
-            }
-          } else {
-            LOG_PRINTF("Task_Audio: file not found: %s\n", selectedPath.c_str());
-            failReason = "file not found";
-          }
-        } else {
-          LOG_PRINTF("Task_Audio: failed to resolve queue index %d\n", appState.currentSelectedIndex);
-          failReason = "resolve queue index failed";
-        }
+        LOG_PRINTF("Task_Audio: failed to resolve queue index %d\n", appState.currentSelectedIndex);
       }
-
-      appState.isPlaying = connected;
-      appState.stopped = !connected;
-      if (!connected && failReason.length() > 0) {
-        LOG_PRINTF("Task_Audio: track switch failed: %s\n", failReason.c_str());
-      }
+      appState.isPlaying = true;
+      appState.stopped = false;  // Ensure playback is not stopped after switching tracks
       appState.nextS = 0;
     }
 
@@ -800,27 +521,6 @@ void Task_Audio(void *pvParameters) {
 // File operations have been migrated to FileManager module
 
 void audio_eof_mp3(const char *info) {
-  if (appState.networkMode) {
-    resetClock();
-    LOG_PRINT("eof_net     ");
-    LOG_PRINTLN(info);
-
-    if (appState.fileCount <= 0) return;
-
-    if (appState.playMode == PlaybackMode::Sequential) {
-      appState.currentPlayingIndex++;
-      if (appState.currentPlayingIndex >= appState.fileCount) appState.currentPlayingIndex = 0;
-    } else if (appState.playMode == PlaybackMode::Random) {
-      appState.currentPlayingIndex = random(0, appState.fileCount);
-    }
-    // SingleRepeat keeps current index unchanged
-
-    appState.currentSelectedIndex = appState.currentPlayingIndex;
-    appState.isPlaying = false;
-    appState.stopped = false;
-    appState.nextS = 1;
-    return;
-  }
   AudioManager::onEOF(info, appState, SD);
 }
 
@@ -831,3 +531,4 @@ void audio_id3data(const char* info) {
 void audio_id3image(File& file, const size_t pos, const size_t size) {
   AudioManager::onID3Image(file, pos, size, appState);
 }
+

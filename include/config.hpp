@@ -87,13 +87,8 @@ constexpr int MODE_Y = 63;
 constexpr int MAX_LIBRARY_FILES = 4096;
 constexpr int FILE_PATH_CACHE_SIZE = 32;
 constexpr int MAX_BROWSER_ENTRIES = 256;
-constexpr int MAX_NETWORK_TRACKS = 80;
 constexpr uint8_t LIBRARY_SCAN_MAX_DEPTH = 32;
 constexpr const char* LIBRARY_INDEX_PATH = "/music/.cp_index.txt";
-constexpr const char* NETWORK_CONFIG_PATH = "/music/.cp_netcfg.txt";
-
-// Network playback
-constexpr int NETWORK_HTTP_TIMEOUT_MS = 12000;
 
 // Cover image scanning
 constexpr size_t COVER_SCAN_MAX = 4096;  // 4KB scan limit

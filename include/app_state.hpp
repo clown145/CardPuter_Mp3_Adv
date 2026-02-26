@@ -73,30 +73,6 @@ struct AppState {
   int pathCacheWritePos = 0;
   String queueDirectory = MUSIC_DIR;                  // Current playback scope
 
-  // Network playback state
-  bool networkMode = false;
-  bool showNetworkPage = false;
-  bool networkEditMode = false;
-  int networkSelectedField = 0;
-  String networkApiBaseUrl = "";
-  String networkWifiSsid = "";
-  String networkWifiPassword = "";
-  String networkPhone = "";
-  String networkCode = "";
-  String networkPlaylistId = "";
-  String networkCookie = "";
-  String networkStatusText = "";
-  unsigned long networkStatusUpdate = 0;
-  int networkTrackCount = 0;
-  String networkTrackTitle[MAX_NETWORK_TRACKS];
-  String networkTrackArtist[MAX_NETWORK_TRACKS];
-  String networkTrackHash[MAX_NETWORK_TRACKS];
-  String networkTrackAlbumAudioId[MAX_NETWORK_TRACKS];
-  String localQueueDirSnapshot = MUSIC_DIR;
-  int localSelectedSnapshot = 0;
-  int localPlayingSnapshot = 0;
-  bool hasLocalQueueSnapshot = false;
-
   // Folder browser state
   bool browserMode = false;
   String browserCurrentDir = MUSIC_DIR;
@@ -131,7 +107,6 @@ struct AppState {
     }
     resetPathCache();
     resetBrowserEntries();
-    clearNetworkQueue();
   }
 
   void resetBrowserEntries() {
@@ -143,21 +118,6 @@ struct AppState {
       browserEntrySongIndex[i] = -1;
       browserEntryName[i] = "";
       browserEntryPath[i] = "";
-    }
-  }
-
-  void clearNetworkQueue() {
-    networkMode = false;
-    networkTrackCount = 0;
-    hasLocalQueueSnapshot = false;
-    localQueueDirSnapshot = MUSIC_DIR;
-    localSelectedSnapshot = 0;
-    localPlayingSnapshot = 0;
-    for (int i = 0; i < MAX_NETWORK_TRACKS; ++i) {
-      networkTrackTitle[i] = "";
-      networkTrackArtist[i] = "";
-      networkTrackHash[i] = "";
-      networkTrackAlbumAudioId[i] = "";
     }
   }
   

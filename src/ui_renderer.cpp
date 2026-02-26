@@ -26,14 +26,6 @@ static String extractDisplayName(const String& fullPath) {
 }
 
 static String getDisplayNameByQueueIndex(AppState& appState, int queueIndex) {
-  if (appState.networkMode) {
-    if (queueIndex < 0 || queueIndex >= appState.networkTrackCount) {
-      return String("[Missing]");
-    }
-    String title = appState.networkTrackTitle[queueIndex];
-    if (title.length() == 0) title = String("[Net]");
-    return title;
-  }
   String path;
   if (!FileManager::getPathByQueueIndex(SD, appState, queueIndex, path)) {
     return String("[Missing]");
@@ -42,7 +34,6 @@ static String getDisplayNameByQueueIndex(AppState& appState, int queueIndex) {
 }
 
 static int getListCount(const AppState& appState) {
-  if (appState.networkMode) return appState.networkTrackCount;
   return appState.browserMode ? appState.browserEntryCount : appState.fileCount;
 }
 
@@ -63,65 +54,6 @@ static String getDisplayNameByListIndex(AppState& appState, int listIndex) {
     return name;
   }
   return getDisplayNameByQueueIndex(appState, listIndex);
-}
-
-static String clipWithPrefix(const String& in, int maxLen) {
-  if (in.length() <= maxLen) return in;
-  return String("...") + in.substring(in.length() - (maxLen - 3));
-}
-
-static String maskPassword(const String& in) {
-  if (in.length() == 0) return "";
-  String out = "";
-  for (int i = 0; i < in.length(); ++i) out += '*';
-  return out;
-}
-
-static void drawNetworkPage(M5Canvas& sprite, AppState& appState) {
-  const uint16_t kSelectBg = 0x39E7;  // dark gray
-  sprite.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BLACK);
-  sprite.setTextFont(0);
-  sprite.setTextColor(GREEN, BLACK);
-  sprite.drawString("NET PLAYER", 6, 2);
-  sprite.setTextColor(WHITE, BLACK);
-  sprite.drawString(appState.networkEditMode ? "Edit: Enter Save" : "Enter Edit  B Back", 86, 2);
-
-  const char* labels[6] = {"API", "SSID", "PWD", "PHONE", "CODE", "LIST"};
-  String values[6] = {
-      appState.networkApiBaseUrl,
-      appState.networkWifiSsid,
-      maskPassword(appState.networkWifiPassword),
-      appState.networkPhone,
-      appState.networkCode,
-      appState.networkPlaylistId,
-  };
-
-  int y = 18;
-  for (int i = 0; i < 6; ++i) {
-    bool selected = (appState.networkSelectedField == i);
-    if (selected) {
-      sprite.fillRect(2, y - 1, SCREEN_WIDTH - 4, 10, kSelectBg);
-    }
-    sprite.setTextColor(selected ? YELLOW : WHITE, selected ? kSelectBg : BLACK);
-    sprite.drawString(labels[i], 6, y);
-    String value = clipWithPrefix(values[i], 30);
-    sprite.drawString(value, 56, y);
-    y += 11;
-  }
-
-  sprite.setTextColor(GREEN, BLACK);
-  sprite.drawString("1:WiFi 2:SMS 3:Login 4:Load 5:Play", 6, 88);
-  sprite.drawString("6:Local ;/.:Field", 6, 100);
-  if (appState.networkMode) {
-    sprite.drawString("Mode: NET", 6, 112);
-  } else {
-    sprite.drawString("Mode: LOCAL", 6, 112);
-  }
-
-  sprite.setTextColor(WHITE, BLACK);
-  String status = clipWithPrefix(appState.networkStatusText, 38);
-  sprite.drawString(status, 6, 124);
-  sprite.pushSprite(0, 0);
 }
 
 void drawId3Page(M5Canvas& sprite,
@@ -423,11 +355,6 @@ void drawMainView(M5Canvas& sprite,
                   ESP32Time& rtc,
                   int (*getBatteryPercent)(),
                   const lgfx::U8g2font* (*detectAndGetFont)(const String&)) {
-  if (appState.showNetworkPage) {
-    drawNetworkPage(sprite, appState);
-    return;
-  }
-
   int listCount = getListCount(appState);
   if (listCount <= 0) {
     appState.currentSelectedIndex = 0;
@@ -650,8 +577,6 @@ void drawMainView(M5Canvas& sprite,
     String modeText = "";
     if (appState.browserMode) {
       modeText = "DIR";
-    } else if (appState.networkMode) {
-      modeText = "NET";
     } else if (appState.playMode == PlaybackMode::Sequential) {
       modeText = "SEQ";
     } else if (appState.playMode == PlaybackMode::Random) {
