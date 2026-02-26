@@ -177,18 +177,6 @@ bool readPathBySongIndex(fs::FS& fs, AppState& appState, int songIndex, String& 
   return true;
 }
 
-int findSongIndexByPath(fs::FS& fs, AppState& appState, const String& targetPath) {
-  if (targetPath.length() == 0) return -1;
-
-  String current;
-  for (int i = 0; i < appState.libraryCount; ++i) {
-    if (readPathBySongIndex(fs, appState, i, current) && current == targetPath) {
-      return i;
-    }
-  }
-  return -1;
-}
-
 int findQueueIndexByPathInternal(fs::FS& fs, AppState& appState, const String& targetPath) {
   if (targetPath.length() == 0) return -1;
 
@@ -407,8 +395,7 @@ bool buildBrowserEntries(fs::FS& fs, AppState& appState, const char* dirname) {
         break;
       }
     } else if (isSupportedAudioFile(entryPath)) {
-      int songIndex = findSongIndexByPath(fs, appState, entryPath);
-      if (!addBrowserSongEntry(appState, songIndex, entryPath)) {
+      if (!addBrowserSongEntry(appState, -1, entryPath)) {
         break;
       }
     }
